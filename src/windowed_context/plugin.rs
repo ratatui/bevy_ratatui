@@ -68,20 +68,25 @@ fn render_terminal_to_handle(
 ) {
     let width = softatui.backend().get_pixmap_width() as u32;
     let height = softatui.backend().get_pixmap_height() as u32;
-    let data = softatui.backend().get_pixmap_data_as_rgba();
 
     let image = images.get_mut(&my_handle.0).expect("Image not found");
-    *image = Image::new(
-        Extent3d {
+    if image.width() != width || image.height() != height {
+        image.resize(Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
-    );
+        });
+    }
+
+    let data = softatui.backend().get_pixmap_data();
+    let image_data = image.data.as_mut().expect("Image data missing");
+    let (pixels, _) = data.as_chunks::<3>();
+    for (i, [r, g, b]) in pixels.into_iter().copied().enumerate() {
+        image_data[i * 4] = r;
+        image_data[i * 4 + 1] = g;
+        image_data[i * 4 + 2] = b;
+        image_data[i * 4 + 3] = 255;
+    }
 }
 
 /// System that reacts to window resize
