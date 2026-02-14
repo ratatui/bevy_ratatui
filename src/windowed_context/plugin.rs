@@ -76,16 +76,21 @@ fn render_terminal_to_handle(
             height,
             depth_or_array_layers: 1,
         });
-    }
-
-    let data = softatui.backend().get_pixmap_data();
-    let image_data = image.data.as_mut().expect("Image data missing");
-    let (pixels, _) = data.as_chunks::<3>();
-    for (i, [r, g, b]) in pixels.into_iter().copied().enumerate() {
-        image_data[i * 4] = r;
-        image_data[i * 4 + 1] = g;
-        image_data[i * 4 + 2] = b;
-        image_data[i * 4 + 3] = 255;
+        image.data = Some(softatui.backend().get_pixmap_data_as_rgba());
+    } else {
+        // efficient fast-path copy using chunks (profile before making changes)
+        let data_in = softatui.backend().get_pixmap_data();
+        let data_out = image.data.as_mut().expect("Image data missing");
+        let (pixels_in, _) = data_in.as_chunks::<3>();
+        let (pixels_out, _) = data_out.as_chunks_mut::<4>();
+        for i in 0..(width * height) as usize {
+            let px_out = &mut pixels_out[i];
+            let px_in = pixels_in[i];
+            px_out[0] = px_in[0];
+            px_out[1] = px_in[1];
+            px_out[2] = px_in[2];
+            // skip writing alpha as it should always be 255 from creation/resizing
+        }
     }
 }
 
