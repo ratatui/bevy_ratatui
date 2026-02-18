@@ -1183,7 +1183,7 @@ checksum = "4f98cbc6d34bbdb58240b72ed1731931b4991a893b3a3238bb7c42ae054aa676"
 
 [[package]]
 name = "bevy_ratatui"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "bevy",
  "bitflags 2.10.0",
