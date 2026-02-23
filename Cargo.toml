@@ -20,7 +20,10 @@ tracing = "0.1.44"
 
 [dev-dependencies]
 rand = "0.9.2"
-bevy = { version = "0.18", default-features = false, features = ["bevy_state"] }
+bevy = { version = "0.18", default-features = false, features = [
+    "default_platform",
+    "ui_bevy_render",
+] }
 ratatui = { version = "0.30.0", default-features = false, features = [
     "underline-color",
     "layout-cache",
@@ -43,7 +46,12 @@ debug-assertions = false
 [features]
 default = ["std", "async_executor", "crossterm", "keyboard", "mouse"]
 crossterm = ["ratatui/crossterm"]
-windowed = ["dep:soft_ratatui", "bevy/default"]
+windowed = [
+    "dep:soft_ratatui",
+    "bevy/bevy_window",
+    "bevy/bevy_ui",
+    "bevy/bevy_render",
+]
 keyboard = ["bevy/keyboard"]
 mouse = ["bevy/mouse"]
 
