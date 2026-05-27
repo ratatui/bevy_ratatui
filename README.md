@@ -50,7 +50,7 @@ use crossterm::event::KeyCode;
 fn input_system(mut messages: MessageReader<KeyMessage>, mut exit: MessageWriter<AppExit>) {
     for message in messages.read() {
         if let KeyCode::Char('q') = message.code {
-            exit.send_default();
+            exit.write_default();
         }
     }
 }
