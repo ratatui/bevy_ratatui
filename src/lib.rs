@@ -64,7 +64,7 @@ mod ratatui_plugin;
 mod windowed_context;
 
 pub use ratatui_context::RatatuiContext;
-pub use ratatui_plugin::RatatuiPlugins;
+pub use ratatui_plugin::{ContextSystems, RatatuiPlugins};
 
 #[cfg(feature = "crossterm")]
 pub use ratatui::crossterm;
