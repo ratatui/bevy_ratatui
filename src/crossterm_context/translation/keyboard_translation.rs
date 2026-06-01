@@ -300,6 +300,7 @@ fn send_key_messages_with_emulation(
     mut keys: MessageReader<KeyMessage>,
     bevy_window: Single<Entity, With<DummyWindow>>,
     mut modifiers: Local<Modifiers>,
+    mut delayed_modifiers: Local<Modifiers>,
     mut last_pressed: Local<LastPress>,
     mut keyboard_input: MessageWriter<KeyboardInput>,
     release_key: Res<ReleaseKey>,
@@ -374,6 +375,11 @@ fn send_key_messages_with_emulation(
             .emulate_capabilities(&detected)
             .contains(Capability::MODIFIER)
     {
+        // Delay modifier release until the next tick, if they were pressed under the current tick
+        if let ReleaseKey::Immediate | ReleaseKey::FrameCount(0 | 1) = &*release_key {
+            std::mem::swap(&mut *modifiers, &mut *delayed_modifiers);
+        };
+
         // Release the modifiers too if we've timed out.
         for flag in **modifiers {
             let state = ButtonState::Released;
