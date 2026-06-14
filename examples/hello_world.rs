@@ -4,7 +4,9 @@ use bevy_ratatui::{RatatuiContext, RatatuiPlugins};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::text::Text;
 
-fn main() {
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
     App::new()
         .add_plugins((
             MinimalPlugins.set(bevy::app::ScheduleRunnerPlugin::run_loop(
@@ -15,6 +17,8 @@ fn main() {
         .add_systems(PreUpdate, input_system)
         .add_systems(Update, draw_system)
         .run();
+
+    Ok(())
 }
 
 fn draw_system(mut context: ResMut<RatatuiContext>) -> Result {

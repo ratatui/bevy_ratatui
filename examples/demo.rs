@@ -30,7 +30,9 @@ use ratatui::{
     widgets::WidgetRef,
 };
 
-fn main() {
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let mut app = App::new();
 
     #[cfg(not(feature = "windowed"))]
@@ -64,6 +66,8 @@ fn main() {
         .add_systems(OnEnter(AppState::Negative), start_background_color_timer)
         .add_systems(OnEnter(AppState::Positive), start_background_color_timer)
         .run();
+
+    Ok(())
 }
 
 fn ui_system(
