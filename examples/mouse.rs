@@ -6,7 +6,9 @@ use bevy_ratatui::{RatatuiContext, RatatuiPlugins, event::KeyMessage, event::Mou
 use rand::prelude::*;
 use ratatui::crossterm::event::MouseEventKind;
 
-fn main() {
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let wait_duration = std::time::Duration::from_secs_f64(1. / 60.); // 60 FPS
     App::new()
         .add_plugins(RatatuiPlugins {
@@ -19,6 +21,8 @@ fn main() {
         .add_systems(Update, (move_balls, bounce_balls.chain()))
         .add_systems(PostUpdate, draw_balls)
         .run();
+
+    Ok(())
 }
 
 fn keyboard_input_system(
