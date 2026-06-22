@@ -51,39 +51,56 @@ impl Plugin for EventPlugin {
             .add_message::<FocusMessage>()
             .add_message::<ResizeMessage>()
             .add_message::<PasteMessage>()
-            .add_message::<CrosstermMessage>()
-            .configure_sets(
-                Update,
-                (
-                    InputSet::Pre,
-                    InputSet::EmitCrossterm,
-                    InputSet::CheckEmulation,
-                    InputSet::EmitBevy,
-                    InputSet::Post,
-                )
-                    .chain(),
-            )
-            .add_systems(
-                PreUpdate,
-                crossterm_event_system.in_set(InputSet::EmitCrossterm),
-            );
+            .add_message::<CrosstermMessage>();
+
+        configure_input_sets(app);
+        app.add_systems(
+            PreUpdate,
+            crossterm_event_system.in_set(InputSet::EmitCrossterm),
+        );
 
         if self.control_c_interrupt {
-            app.add_systems(Update, control_c_interrupt_system.in_set(InputSet::Post));
+            app.add_systems(PreUpdate, control_c_interrupt_system.in_set(InputSet::Post));
         }
     }
 }
 
-/// InputSet defines when the input messages are emitted.
+/// Orders the public input extension points in the schedule that emits terminal messages.
+fn configure_input_sets(app: &mut App) {
+    app.configure_sets(
+        PreUpdate,
+        (
+            InputSet::Pre,
+            InputSet::EmitCrossterm,
+            InputSet::CheckEmulation,
+            InputSet::EmitBevy,
+            InputSet::Post,
+        )
+            .chain(),
+    );
+}
+
+/// Input-processing phases ordered within [`PreUpdate`].
+///
+/// Bevy configures system-set ordering separately for each schedule. Systems using these extension
+/// points must therefore be added to `PreUpdate` for the ordering below to apply:
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_ratatui::event::{InputSet, KeyMessage};
+/// # fn handle_keys(_: MessageReader<KeyMessage>) {}
+/// # let mut app = App::new();
+/// app.add_systems(PreUpdate, handle_keys.in_set(InputSet::Post));
+/// ```
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub enum InputSet {
     /// Run before any input messages are emitted.
     Pre,
     /// Emit the crossterm messages.
     EmitCrossterm,
-    /// Check for emulation
+    /// Check for emulation.
     CheckEmulation,
-    /// Emit the bevy messages if [crate::input_forwarding::KeyboardPlugin] has been added.
+    /// Emit the bevy messages if [`crate::translation::TranslationPlugin`] has been added.
     EmitBevy,
     /// Run after all input messages are emitted.
     Post,
@@ -164,5 +181,59 @@ fn control_c_interrupt_system(
         {
             exit.write_default();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Execution trace used to verify the schedule contract exposed by [`InputSet`].
+    #[derive(Default, Resource)]
+    struct InputOrder(Vec<InputSet>);
+
+    #[test]
+    fn input_sets_run_in_order_during_pre_update() {
+        let mut app = App::new();
+        configure_input_sets(&mut app);
+        app.init_resource::<InputOrder>()
+            .add_systems(PreUpdate, record_pre.in_set(InputSet::Pre))
+            .add_systems(PreUpdate, record_crossterm.in_set(InputSet::EmitCrossterm))
+            .add_systems(PreUpdate, record_emulation.in_set(InputSet::CheckEmulation))
+            .add_systems(PreUpdate, record_bevy.in_set(InputSet::EmitBevy))
+            .add_systems(PreUpdate, record_post.in_set(InputSet::Post));
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<InputOrder>().0,
+            [
+                InputSet::Pre,
+                InputSet::EmitCrossterm,
+                InputSet::CheckEmulation,
+                InputSet::EmitBevy,
+                InputSet::Post,
+            ]
+        );
+    }
+
+    fn record_pre(mut order: ResMut<InputOrder>) {
+        order.0.push(InputSet::Pre);
+    }
+
+    fn record_crossterm(mut order: ResMut<InputOrder>) {
+        order.0.push(InputSet::EmitCrossterm);
+    }
+
+    fn record_emulation(mut order: ResMut<InputOrder>) {
+        order.0.push(InputSet::CheckEmulation);
+    }
+
+    fn record_bevy(mut order: ResMut<InputOrder>) {
+        order.0.push(InputSet::EmitBevy);
+    }
+
+    fn record_post(mut order: ResMut<InputOrder>) {
+        order.0.push(InputSet::Post);
     }
 }
