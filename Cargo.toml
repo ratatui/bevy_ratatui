@@ -27,6 +27,11 @@ ratatui = { version = "0.30.0", default-features = false, features = [
     "unstable-widget-ref",
 ] }
 
+[[example]]
+name = "snake"
+path = "examples/snake/main.rs"
+test = true
+
 # Enable a small amount of optimization in debug mode
 [profile.dev]
 opt-level = 1
