@@ -42,6 +42,7 @@ fn draw_system(mut context: ResMut<RatatuiContext>) -> Result {
 
 To read user input, you can listen for the crossterm input messages forwarded by
 this crate:
+
 ```rust
 use bevy::app::AppExit;
 use bevy_ratatui::event::KeyMessage;
@@ -55,6 +56,7 @@ fn input_system(mut messages: MessageReader<KeyMessage>, mut exit: MessageWriter
     }
 }
 ```
+
 ...or use the `enable_input_forwarding` option in `RatatuiPlugins` which will
 map crossterm input events to normal bevy input messages.
 
@@ -63,6 +65,8 @@ map crossterm input events to normal bevy input messages.
 ![Made with VHS](https://vhs.charm.sh/vhs-2g0S6RgGGQHseTCNItEQhg.gif)
 
 See the [demo example](examples/demo.rs) for the code and more information.
+For a larger multi-file game example, see the
+[snake example](examples/snake/README.md).
 
 ## features
 
@@ -76,12 +80,14 @@ There are also a handful of features relating to running Bevy in `no_std` mode.
 ## see also
 
 ### integrates with
+
 - [bevy](https://github.com/bevyengine/bevy): A refreshingly simple data-driven
   game engine built in Rust.
 - [ratatui](https://github.com/ratatui/ratatui): A Rust crate for cooking up
   terminal user interfaces (TUIs).
 
 ### more tools
+
 - [egui_ratatui](https://github.com/gold-silver-copper/egui_ratatui): A ratatui
   backend that is also an egui widget. Deploy on web with WASM or ship natively
   with bevy, macroquad, or eframe. Demo at
@@ -91,6 +97,7 @@ There are also a handful of features relating to running Bevy in `no_std` mode.
   camera's rendered image to text and draws it to the terminal with ratatui.
 
 ### alternatives
+
 - [widgetui](https://github.com/TheEmeraldBee/widgetui): A wrapper for ratatui
   that reduces boilerplate and handles the update loop. Uses an approach
   similar to bevy systems.
