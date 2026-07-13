@@ -11,7 +11,7 @@ categories = ["command-line-interface"]
 keywords = ["cli", "ratatui", "terminal", "tui", "bevy"]
 
 [dependencies]
-bevy = { version = "0.18", default-features = false }
+bevy = { version = "0.19", default-features = false }
 bitflags = "2.8.0"
 color-eyre = "0.6.3"
 ratatui = { version = "0.30.0", default-features = false }
@@ -20,11 +20,13 @@ tracing = "0.1.44"
 
 [dev-dependencies]
 rand = "0.9.3"
-bevy = { version = "0.18", default-features = false, features = ["bevy_state"] }
+bevy = { version = "0.19", default-features = false, features = [
+  "bevy_state",
+] }
 ratatui = { version = "0.30.0", default-features = false, features = [
-    "underline-color",
-    "layout-cache",
-    "unstable-widget-ref",
+  "underline-color",
+  "layout-cache",
+  "unstable-widget-ref",
 ] }
 
 # Enable a small amount of optimization in debug mode

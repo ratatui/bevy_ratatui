@@ -148,7 +148,7 @@ fn hotkeys(
 
 fn keyboard_input_system(mut messages: MessageReader<KeyMessage>, mut commands: Commands) {
     for message in messages.read() {
-        commands.insert_resource(LastKeypress(message.clone()));
+        commands.insert_resource(LastKeypress(*message));
     }
 }
 

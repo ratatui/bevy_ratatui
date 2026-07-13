@@ -978,7 +978,7 @@ fn crossterm_modifier_to_bevy_key(
 
 fn logical_key_to_text(logical_key: &bevy::input::keyboard::Key) -> Option<String> {
     if let bevy::input::keyboard::Key::Character(character) = logical_key {
-        Some(String::from(character.clone()))
+        Some(character.to_string())
     } else {
         None
     }

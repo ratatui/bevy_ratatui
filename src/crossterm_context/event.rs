@@ -83,7 +83,7 @@ pub enum InputSet {
     EmitCrossterm,
     /// Check for emulation
     CheckEmulation,
-    /// Emit the bevy messages if [crate::input_forwarding::KeyboardPlugin] has been added.
+    /// Emit the bevy messages if [crate::translation::TranslationPlugin] has been added.
     EmitBevy,
     /// Run after all input messages are emitted.
     Post,

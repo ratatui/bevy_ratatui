@@ -49,7 +49,7 @@
 //! # Input Forwarding
 //!
 //! The terminal input can be forwarded to the bevy input system. See the
-//! [input_forwarding] module documentation for details.
+//! [translation] module documentation for details.
 //!
 //! [Bevy]: https://bevyengine.org
 //! [Ratatui]: https://ratatui.rs

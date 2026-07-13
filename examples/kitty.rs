@@ -61,7 +61,7 @@ fn keyboard_input_system(
                 exit.write_default();
             }
             _ => {
-                commands.insert_resource(LastKeypress(message.clone()));
+                commands.insert_resource(LastKeypress(*message));
             }
         }
     }
