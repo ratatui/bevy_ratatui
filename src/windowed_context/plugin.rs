@@ -69,7 +69,7 @@ fn render_terminal_to_handle(
     let width = softatui.backend().get_pixmap_width() as u32;
     let height = softatui.backend().get_pixmap_height() as u32;
 
-    let image = images.get_mut(&my_handle.0).expect("Image not found");
+    let mut image = images.get_mut(&my_handle.0).expect("Image not found");
     if image.width() != width || image.height() != height {
         image.resize(Extent3d {
             width,
