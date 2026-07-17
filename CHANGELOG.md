@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+## [0.11.2](https://github.com/ratatui/bevy_ratatui/compare/v0.11.1...v0.11.2) - 2026-07-17
+
+### Other
+
+- Add snake example
+- Fix terminal input schedule ordering
+- Small typo
+- Delay modifier release by at least 1 tick
+- Bump rand from 0.9.2 to 0.9.3 ([#94](https://github.com/ratatui/bevy_ratatui/pull/94))
+
 ## [0.11.1](https://github.com/ratatui/bevy_ratatui/compare/v0.11.0...v0.11.1) - 2026-02-18
 
 ### Other
