@@ -1,4 +1,5 @@
 use std::io::{Stdout, stdout};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bevy::prelude::*;
 
@@ -19,12 +20,18 @@ use super::mouse::MousePlugin;
 #[cfg(feature = "keyboard")]
 use super::translation::TranslationPlugin;
 
+static TERMINAL_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
 /// Ratatui context that will draw to the terminal buffer using crossterm.
 #[derive(Deref, DerefMut, Debug)]
 pub struct CrosstermContext(Terminal<CrosstermBackend<Stdout>>);
 
 impl TerminalContext<CrosstermBackend<Stdout>> for CrosstermContext {
     fn init() -> Result<Self> {
+        if TERMINAL_INITIALIZED.swap(true, Ordering::Relaxed) {
+            return Err("Only one CrosstermContext can exist at a time".into());
+        }
+
         let mut stdout = stdout();
         stdout.execute(EnterAlternateScreen)?;
         enable_raw_mode()?;
@@ -34,11 +41,13 @@ impl TerminalContext<CrosstermBackend<Stdout>> for CrosstermContext {
     }
 
     fn restore() -> Result<()> {
-        let mut stdout = stdout();
-        stdout
-            .execute(LeaveAlternateScreen)?
-            .execute(cursor::Show)?;
-        disable_raw_mode()?;
+        if TERMINAL_INITIALIZED.swap(false, Ordering::Relaxed) {
+            let mut stdout = stdout();
+            stdout
+                .execute(LeaveAlternateScreen)?
+                .execute(cursor::Show)?;
+            disable_raw_mode()?;
+        }
         Ok(())
     }
 
