@@ -6,7 +6,9 @@ use bevy_ratatui::{RatatuiContext, RatatuiPlugins, event::KeyMessage, kitty::Kit
 use ratatui::crossterm::event::KeyEventKind;
 use ratatui::text::Text;
 
-fn main() {
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let wait_duration = std::time::Duration::from_secs_f64(1. / 60.); // 60 FPS
     App::new()
         .add_plugins(RatatuiPlugins::default())
@@ -14,6 +16,8 @@ fn main() {
         .add_systems(PreUpdate, keyboard_input_system)
         .add_systems(Update, draw_scene_system)
         .run();
+
+    Ok(())
 }
 
 #[derive(Resource, Deref, DerefMut)]

@@ -56,7 +56,9 @@ use terminal::draw_terminal;
 /// frame rate keeps terminal input and partial-cell rendering responsive, while
 /// [`game_loop::GameTiming`] demonstrates that application updates can use their own slower
 /// cadence.
-fn main() {
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let translate_input = translate_keyboard_input.in_set(InputSet::Post);
 
     App::new()
@@ -77,4 +79,6 @@ fn main() {
         )
         .add_systems(PostUpdate, draw_terminal)
         .run();
+
+    Ok(())
 }
