@@ -26,8 +26,6 @@ jobs:
           components: rustfmt
       - name: cargo fmt
         run: cargo fmt -- --check
-      - name: cache cargo dependencies
-        uses: Swatinem/rust-cache@v2
 
   clippy:
     name: clippy - ${{ matrix.toolchain }}
@@ -49,10 +47,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: clippy
-        uses: clechasseur/rs-clippy-check@v3
       - name: cache cargo dependencies
         uses: Swatinem/rust-cache@v2
+      - name: clippy
+        uses: clechasseur/rs-clippy-check@v3
 
   doc:
     name: doc
