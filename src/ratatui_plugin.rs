@@ -1,9 +1,11 @@
+use std::marker::PhantomData;
+
 use bevy::{
     app::{Plugin, PluginGroup, PluginGroupBuilder, Startup},
     prelude::{Commands, Result},
 };
 
-use crate::{RatatuiContext, context::DefaultContext};
+use crate::RatatuiContext;
 
 use crate::context::TerminalContext;
 
@@ -26,6 +28,12 @@ pub struct RatatuiPlugins {
     pub enable_input_forwarding: bool,
 }
 
+impl RatatuiPlugins {
+    pub fn in_context<C: TerminalContext>(self) -> RatatuiPluginsFor<C> {
+        RatatuiPluginsFor(self, PhantomData)
+    }
+}
+
 impl Default for RatatuiPlugins {
     fn default() -> Self {
         Self {
@@ -38,28 +46,50 @@ impl Default for RatatuiPlugins {
 
 impl PluginGroup for RatatuiPlugins {
     fn build(self) -> PluginGroupBuilder {
+        self.in_context::<crate::context::DefaultContext>().build()
+    }
+}
+
+pub struct RatatuiPluginsFor<C: TerminalContext>(RatatuiPlugins, PhantomData<fn() -> C>);
+
+impl<C: TerminalContext> Default for RatatuiPluginsFor<C> {
+    fn default() -> Self {
+        RatatuiPlugins::default().in_context::<C>()
+    }
+}
+
+impl<C: TerminalContext> PluginGroup for RatatuiPluginsFor<C> {
+    fn build(self) -> PluginGroupBuilder {
         let mut builder = PluginGroupBuilder::start::<Self>();
 
-        builder = builder.add(ContextPlugin);
+        builder = builder.add(ContextPlugin::<C>::default());
 
-        builder = DefaultContext::configure_plugin_group(&self, builder);
+        builder = C::configure_plugin_group(&self.0, builder);
 
         builder
     }
 }
 
 /// The plugin responsible for adding the `RatatuiContext` resource to your bevy application.
-pub struct ContextPlugin;
+pub struct ContextPlugin<C: TerminalContext = crate::context::DefaultContext>(
+    PhantomData<fn() -> C>,
+);
 
-impl Plugin for ContextPlugin {
+impl<C: TerminalContext> Default for ContextPlugin<C> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<C: TerminalContext> Plugin for ContextPlugin<C> {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_systems(Startup, context_setup);
+        app.add_systems(Startup, context_setup::<C>);
     }
 }
 
 /// A startup system that sets up the terminal context.
-pub fn context_setup(mut commands: Commands) -> Result {
-    let terminal = RatatuiContext::init()?;
+pub fn context_setup<C: TerminalContext>(mut commands: Commands) -> Result {
+    let terminal = RatatuiContext::<C>::init()?;
     commands.insert_resource(terminal);
 
     Ok(())

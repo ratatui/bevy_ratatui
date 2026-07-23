@@ -64,7 +64,7 @@ mod ratatui_plugin;
 mod windowed_context;
 
 pub use ratatui_context::RatatuiContext;
-pub use ratatui_plugin::RatatuiPlugins;
+pub use ratatui_plugin::{RatatuiPlugins, RatatuiPluginsFor};
 
 #[cfg(feature = "crossterm")]
 pub use ratatui::crossterm;
@@ -76,7 +76,7 @@ pub mod context {
     pub use super::ratatui_context::DefaultContext;
     pub use super::ratatui_plugin::ContextPlugin;
     #[cfg(feature = "windowed")]
-    pub use super::windowed_context::context::WindowedContext;
+    pub use super::windowed_context::context::{SoftTerminalContext, WindowedContext};
 }
 
 #[cfg(feature = "crossterm")]
@@ -115,5 +115,6 @@ pub mod translation {
 
 #[cfg(feature = "windowed")]
 pub mod windowed {
+    pub use super::windowed_context::context::SoftTerminalContext;
     pub use super::windowed_context::plugin::WindowedPlugin;
 }

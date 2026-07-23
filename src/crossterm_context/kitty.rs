@@ -1,5 +1,6 @@
 //! Enhanced kitty keyboard protocol.
 use std::io::{self, stdout};
+use std::marker::PhantomData;
 
 use bevy::prelude::*;
 use ratatui::crossterm::{
@@ -8,6 +9,7 @@ use ratatui::crossterm::{
     terminal::supports_keyboard_enhancement,
 };
 
+use crate::context::TerminalContext;
 use crate::ratatui_plugin::context_setup;
 
 /// Plugin responsible for enabling the Kitty keyboard protocol in the current buffer.
@@ -20,11 +22,19 @@ use crate::ratatui_plugin::context_setup;
 /// detect the event type you are looking for.
 ///
 /// [kitty keyboard protocol]: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
-pub struct KittyPlugin;
+pub struct KittyPlugin<C: TerminalContext = crate::context::CrosstermContext>(
+    PhantomData<fn() -> C>,
+);
 
-impl Plugin for KittyPlugin {
+impl<C: TerminalContext> Default for KittyPlugin<C> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<C: TerminalContext> Plugin for KittyPlugin<C> {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_systems(Startup, kitty_setup.after(context_setup));
+        app.add_systems(Startup, kitty_setup.after(context_setup::<C>));
     }
 }
 

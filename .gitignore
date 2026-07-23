@@ -1,1 +1,3 @@
 /target
+/custom_soft_backend_demo/target
+custom_soft_backend_demo/Cargo.lock

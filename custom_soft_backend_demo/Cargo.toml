@@ -1,0 +1,11 @@
+[package]
+name = "custom_soft_backend_demo"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bevy = { version = "0.18", default-features = true }
+bevy_ratatui = { path = "..", default-features = false, features = ["windowed"] }
+ratatui = { version = "0.30.0", default-features = false }
+soft_ratatui = { version = "0.1" }

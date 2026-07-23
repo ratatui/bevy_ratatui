@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use bevy::{
     asset::RenderAssetUsages,
     prelude::*,
@@ -7,15 +9,25 @@ use bevy::{
 
 use crate::RatatuiContext;
 
+use super::context::SoftTerminalContext;
+
 /// A plugin that, rather than drawing to a terminal buffer, uses software rendering to build a 2D
 /// texture from the ratatui buffer, and displays the result in a window.
-pub struct WindowedPlugin;
+pub struct WindowedPlugin<C: SoftTerminalContext = crate::context::WindowedContext>(
+    PhantomData<fn() -> C>,
+);
 
-impl Plugin for WindowedPlugin {
+impl<C: SoftTerminalContext> Default for WindowedPlugin<C> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<C: SoftTerminalContext> Plugin for WindowedPlugin<C> {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostStartup, terminal_render_setup)
-            .add_systems(PreUpdate, handle_resize_messages)
-            .add_systems(Update, render_terminal_to_handle);
+        app.add_systems(PostStartup, terminal_render_setup::<C>)
+            .add_systems(PreUpdate, handle_resize_messages::<C>)
+            .add_systems(Update, render_terminal_to_handle::<C>);
     }
 }
 
@@ -23,16 +35,16 @@ impl Plugin for WindowedPlugin {
 struct TerminalRender(Handle<Image>);
 
 /// A startup system that sets up the terminal
-pub fn terminal_render_setup(
+pub fn terminal_render_setup<C: SoftTerminalContext>(
     mut commands: Commands,
-    softatui: ResMut<RatatuiContext>,
+    softatui: ResMut<RatatuiContext<C>>,
     mut images: ResMut<Assets<Image>>,
 ) -> Result {
     commands.spawn(Camera2d);
     // Create an image that we are going to draw into
-    let width = softatui.backend().get_pixmap_width() as u32;
-    let height = softatui.backend().get_pixmap_height() as u32;
-    let data = softatui.backend().get_pixmap_data_as_rgba();
+    let width = softatui.soft_backend().get_pixmap_width() as u32;
+    let height = softatui.soft_backend().get_pixmap_height() as u32;
+    let data = softatui.soft_backend().get_pixmap_data_as_rgba();
 
     let image = Image::new(
         Extent3d {
@@ -61,13 +73,13 @@ pub fn terminal_render_setup(
 }
 
 /// System that updates the terminal texture each frame
-fn render_terminal_to_handle(
-    softatui: ResMut<RatatuiContext>,
+fn render_terminal_to_handle<C: SoftTerminalContext>(
+    softatui: ResMut<RatatuiContext<C>>,
     mut images: ResMut<Assets<Image>>,
     my_handle: Res<TerminalRender>,
 ) {
-    let width = softatui.backend().get_pixmap_width() as u32;
-    let height = softatui.backend().get_pixmap_height() as u32;
+    let width = softatui.soft_backend().get_pixmap_width() as u32;
+    let height = softatui.soft_backend().get_pixmap_height() as u32;
 
     let image = images.get_mut(&my_handle.0).expect("Image not found");
     if image.width() != width || image.height() != height {
@@ -76,10 +88,10 @@ fn render_terminal_to_handle(
             height,
             depth_or_array_layers: 1,
         });
-        image.data = Some(softatui.backend().get_pixmap_data_as_rgba());
+        image.data = Some(softatui.soft_backend().get_pixmap_data_as_rgba());
     } else {
         // efficient fast-path copy using chunks
-        let data_in = softatui.backend().get_pixmap_data();
+        let data_in = softatui.soft_backend().get_pixmap_data();
         let data_out = image.data.as_mut().expect("Image data missing");
         let (pixels_in, _) = data_in.as_chunks::<3>();
         let (pixels_out, _) = data_out.as_chunks_mut::<4>();
@@ -95,15 +107,15 @@ fn render_terminal_to_handle(
 }
 
 /// System that reacts to window resize
-fn handle_resize_messages(
+fn handle_resize_messages<C: SoftTerminalContext>(
     mut resize_reader: MessageReader<WindowResized>,
-    mut softatui: ResMut<RatatuiContext>,
+    mut softatui: ResMut<RatatuiContext<C>>,
 ) {
     for message in resize_reader.read() {
-        let cur_pix_width = softatui.backend().char_width;
-        let cur_pix_height = softatui.backend().char_height;
+        let cur_pix_width = softatui.soft_backend().char_width;
+        let cur_pix_height = softatui.soft_backend().char_height;
         let av_wid = (message.width / cur_pix_width as f32) as u16;
         let av_hei = (message.height / cur_pix_height as f32) as u16;
-        softatui.backend_mut().resize(av_wid, av_hei);
+        softatui.soft_backend_mut().resize(av_wid, av_hei);
     }
 }

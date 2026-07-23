@@ -23,7 +23,9 @@ use super::translation::TranslationPlugin;
 #[derive(Deref, DerefMut, Debug)]
 pub struct CrosstermContext(Terminal<CrosstermBackend<Stdout>>);
 
-impl TerminalContext<CrosstermBackend<Stdout>> for CrosstermContext {
+impl TerminalContext for CrosstermContext {
+    type Backend = CrosstermBackend<Stdout>;
+
     fn init() -> Result<Self> {
         let mut stdout = stdout();
         stdout.execute(EnterAlternateScreen)?;
@@ -47,10 +49,10 @@ impl TerminalContext<CrosstermBackend<Stdout>> for CrosstermContext {
         mut builder: bevy::app::PluginGroupBuilder,
     ) -> bevy::app::PluginGroupBuilder {
         builder = builder
-            .add(CleanupPlugin)
-            .add(ErrorPlugin)
+            .add(CleanupPlugin::<Self>::default())
+            .add(ErrorPlugin::<Self>::default())
             .add(EventPlugin::default())
-            .add(KittyPlugin);
+            .add(KittyPlugin::<Self>::default());
 
         #[cfg(feature = "mouse")]
         let builder = builder.add(MousePlugin);
@@ -59,7 +61,7 @@ impl TerminalContext<CrosstermBackend<Stdout>> for CrosstermContext {
 
         let mut builder = builder;
         if !group.enable_kitty_protocol {
-            builder = builder.disable::<KittyPlugin>();
+            builder = builder.disable::<KittyPlugin<Self>>();
         }
 
         #[cfg(feature = "mouse")]
