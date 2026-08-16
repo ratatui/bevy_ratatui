@@ -12,7 +12,7 @@ use crate::RatatuiContext;
 /// A plugin that sets up panic handling.
 ///
 /// This plugin installs a hook for panic handling that restores the terminal before printing the
-/// panic or error message. This ensures that the error message is not messed up by the terminal
+/// panic message. This ensures that the panic message is not messed up by the terminal
 /// state.
 pub struct ErrorPlugin;
 
