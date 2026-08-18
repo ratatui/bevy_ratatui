@@ -65,8 +65,11 @@ map crossterm input events to normal bevy input messages.
 ![Made with VHS](https://vhs.charm.sh/vhs-2g0S6RgGGQHseTCNItEQhg.gif)
 
 See the [demo example](examples/demo.rs) for the code and more information.
-For a larger multi-file game example, see the
-[snake example](examples/snake/README.md).
+For splitting the terminal into regions with Ratatui layouts, see the
+[layout example](examples/layout.rs), and the
+[layout stress test](examples/layout_test.rs) for nested layouts, every
+constraint and flex mode, and every widget. For a larger multi-file game
+example, see the [snake example](examples/snake/README.md).
 
 ## features
 
