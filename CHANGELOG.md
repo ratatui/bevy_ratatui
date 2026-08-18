@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+## [0.11.2](https://github.com/ratatui/bevy_ratatui/compare/v0.11.1...v0.11.2) - 2026-08-18
+
+### Fixed
+
+- fix incorrect caching in workflows ([#96](https://github.com/ratatui/bevy_ratatui/pull/96))
+
+### Other
+
+- Add a layout example and a layout stress test ([#112](https://github.com/ratatui/bevy_ratatui/pull/112))
+- Fix the demo background color freezing on an early sign flip ([#111](https://github.com/ratatui/bevy_ratatui/pull/111))
+- Narrow the windowed feature and drop patch-level version requirements ([#110](https://github.com/ratatui/bevy_ratatui/pull/110))
+- Fix ErrorPlugin docs ([#109](https://github.com/ratatui/bevy_ratatui/pull/109))
+- Don't restore the terminal in the eyre hook. ([#106](https://github.com/ratatui/bevy_ratatui/pull/106))
+- Update bevy to `0.19` ([#98](https://github.com/ratatui/bevy_ratatui/pull/98))
+- Add snake example
+- Fix terminal input schedule ordering
+- Small typo
+- Delay modifier release by at least 1 tick
+- Bump rand from 0.9.2 to 0.9.3 ([#94](https://github.com/ratatui/bevy_ratatui/pull/94))
+
 ## [0.11.1](https://github.com/ratatui/bevy_ratatui/compare/v0.11.0...v0.11.1) - 2026-02-18
 
 ### Other
