@@ -112,14 +112,15 @@ There are also a handful of features relating to running Bevy in `no_std` mode.
 
 ## compatibility
 
-| bevy  | bevy_ratatui |
-|-------|--------------|
-| 0.18  | 0.11         |
-| 0.17  | 0.10         |
-| 0.16  | 0.9          |
-| 0.15  | 0.7          |
-| 0.14  | 0.6          |
-| 0.13  | 0.5          |
+| bevy | bevy_ratatui   |
+|------|----------------|
+| 0.19 | 0.11.2         |
+| 0.18 | 0.11.0–0.11.1 |
+| 0.17 | 0.10           |
+| 0.16 | 0.9            |
+| 0.15 | 0.7            |
+| 0.14 | 0.6            |
+| 0.13 | 0.5            |
 
 ## license
 
