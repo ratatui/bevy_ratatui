@@ -8,7 +8,7 @@ use ratatui::crossterm::{
     terminal::supports_keyboard_enhancement,
 };
 
-use crate::ratatui_plugin::context_setup;
+use crate::ContextSystems;
 
 /// Plugin responsible for enabling the Kitty keyboard protocol in the current buffer.
 ///
@@ -24,7 +24,7 @@ pub struct KittyPlugin;
 
 impl Plugin for KittyPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_systems(Startup, kitty_setup.after(context_setup));
+        app.add_systems(Startup, kitty_setup.in_set(ContextSystems::PostSetup));
     }
 }
 
