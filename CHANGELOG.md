@@ -4,6 +4,123 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+## [0.13.0](https://github.com/ratatui/bevy_ratatui/compare/v0.12.0...v0.13.0) - 2026-09-11
+
+### Added
+
+- Add passthrough `serde` feature
+- Emit bevy_input keyboard events ([#13](https://github.com/ratatui/bevy_ratatui/pull/13))
+- add rest of crossterm events
+
+### Fixed
+
+- fix incorrect caching in workflows ([#96](https://github.com/ratatui/bevy_ratatui/pull/96))
+- fixed workflow to work with trusted publishing
+- fix for windowed crash on macos
+- fixed missing backquote / backtick / tilde forwarding ([#81](https://github.com/ratatui/bevy_ratatui/pull/81))
+- fixed workflows
+- fixed issue when bevy/bevy_winit feature enabled
+
+### Other
+
+- release v0.12.0 ([#95](https://github.com/ratatui/bevy_ratatui/pull/95))
+- Update Bevy compatibility table ([#108](https://github.com/ratatui/bevy_ratatui/pull/108))
+- Add a layout example and a layout stress test ([#112](https://github.com/ratatui/bevy_ratatui/pull/112))
+- Fix the demo background color freezing on an early sign flip ([#111](https://github.com/ratatui/bevy_ratatui/pull/111))
+- Narrow the windowed feature and drop patch-level version requirements ([#110](https://github.com/ratatui/bevy_ratatui/pull/110))
+- Fix ErrorPlugin docs ([#109](https://github.com/ratatui/bevy_ratatui/pull/109))
+- Don't restore the terminal in the eyre hook. ([#106](https://github.com/ratatui/bevy_ratatui/pull/106))
+- Update bevy to `0.19` ([#98](https://github.com/ratatui/bevy_ratatui/pull/98))
+- Add snake example
+- Fix terminal input schedule ordering
+- Small typo
+- Delay modifier release by at least 1 tick
+- Bump rand from 0.9.2 to 0.9.3 ([#94](https://github.com/ratatui/bevy_ratatui/pull/94))
+- Bump bytes from 1.11.0 to 1.11.1 ([#84](https://github.com/ratatui/bevy_ratatui/pull/84))
+- release v0.11.1
+- remove default crossterm dependency
+- Bump time from 0.3.46 to 0.3.47
+- Improve performance for windowed rendering ([#89](https://github.com/ratatui/bevy_ratatui/pull/89))
+- Transferred to ratatui org ([#85](https://github.com/ratatui/bevy_ratatui/pull/85))
+- Migration to bevy 0.18
+- Bumps dependencies for ratatui v0.30.0. ([#79](https://github.com/ratatui/bevy_ratatui/pull/79))
+- release v0.10.0 ([#73](https://github.com/ratatui/bevy_ratatui/pull/73))
+- migration to bevy 0.17
+- release v0.9.3 ([#70](https://github.com/ratatui/bevy_ratatui/pull/70))
+- Bump tracing-subscriber from 0.3.19 to 0.3.20 ([#66](https://github.com/ratatui/bevy_ratatui/pull/66))
+- bump soft_ratatui ([#68](https://github.com/ratatui/bevy_ratatui/pull/68))
+- release v0.10.0
+- remove direct dependency on crossterm
+- release v0.9.1
+- new feature for toggling crossterm context
+- release v0.9.0
+- miscellaneous docs updates
+- public facing module structure
+- miscellaneous fixes for examples
+- refactored for encapsulation of context type
+- miscellaneous improvements and addressed comments
+- rename window feature from 'soft' to 'windowed'
+- integrate soft_ratatui for a windowed output mode
+- release v0.8.3
+- make control_c_interrupt public
+- updated lock file
+- release v0.9.0
+- actually remove ctrl-c behavior from passthrough
+- release v0.8.1
+- release v0.7.2
+- make ctrl+c handling optional
+- cargo fmt
+- cargo fix --edition
+- migration to bevy 0.16
+- release v0.7.1
+- cleaned up README, examples
+- transer ownership to cxreiff ([#39](https://github.com/ratatui/bevy_ratatui/pull/39))
+- Bump the cargo-dependencies group across 1 directory with 4 updates ([#34](https://github.com/ratatui/bevy_ratatui/pull/34))
+- version 0.7.0 bump ([#29](https://github.com/ratatui/bevy_ratatui/pull/29))
+- Bevy 0.15 migration ([#27](https://github.com/ratatui/bevy_ratatui/pull/27))
+- release v0.6.4 ([#25](https://github.com/ratatui/bevy_ratatui/pull/25))
+- Bump the cargo-dependencies group across 1 directory with 3 updates ([#24](https://github.com/ratatui/bevy_ratatui/pull/24))
+- release ([#22](https://github.com/ratatui/bevy_ratatui/pull/22))
+- Bump ratatui from 0.28.0 to 0.28.1 in the cargo-dependencies group ([#21](https://github.com/ratatui/bevy_ratatui/pull/21))
+- release ([#19](https://github.com/ratatui/bevy_ratatui/pull/19))
+- Bump ratatui from 0.27.0 to 0.28.0 in the cargo-dependencies group ([#20](https://github.com/ratatui/bevy_ratatui/pull/20))
+- Bump the cargo-dependencies group with 2 updates ([#18](https://github.com/ratatui/bevy_ratatui/pull/18))
+- release ([#14](https://github.com/ratatui/bevy_ratatui/pull/14))
+- Removed dynamic_linking feature ([#17](https://github.com/ratatui/bevy_ratatui/pull/17))
+- Bump version to 0.6.0 to indicate bevy version compatibility ([#12](https://github.com/ratatui/bevy_ratatui/pull/12))
+- release ([#11](https://github.com/ratatui/bevy_ratatui/pull/11))
+- Migrate to Bevy 0.14 ([#10](https://github.com/ratatui/bevy_ratatui/pull/10))
+- release ([#9](https://github.com/ratatui/bevy_ratatui/pull/9))
+- Bump ratatui from 0.26.3 to 0.27.0 in the cargo-dependencies group ([#8](https://github.com/ratatui/bevy_ratatui/pull/8))
+- release ([#7](https://github.com/ratatui/bevy_ratatui/pull/7))
+- Ensure kitty setup runs after terminal setup ([#6](https://github.com/ratatui/bevy_ratatui/pull/6))
+- release ([#4](https://github.com/ratatui/bevy_ratatui/pull/4))
+- Move mouse to separate plugin
+- Make kitty protocol configurable
+- added kitty protocol support. ([#5](https://github.com/ratatui/bevy_ratatui/pull/5))
+- add mouse event example
+- Add more docs
+- release ([#3](https://github.com/ratatui/bevy_ratatui/pull/3))
+- Add docs and hello world example ([#2](https://github.com/ratatui/bevy_ratatui/pull/2))
+- Add description to cargo.toml
+- Prepare for initial crate release ([#1](https://github.com/ratatui/bevy_ratatui/pull/1))
+- Add readme info
+- add demo and tweak colors / timing
+- Animate the background color when changing from positive to negative
+- Add keys / instructions to readme
+- Create LICENSE
+- Disable bevy default features for speeding up compile times
+- Add readme
+- demonstrate how bevy makes changing state elsewhere in the app easy
+- formatting
+- add plugin per module
+- rearrange to modules
+- initial implementation
+
+### Removed
+
+- removed some cfg feature gates
+
 ## [0.12.0](https://github.com/ratatui/bevy_ratatui/compare/v0.11.1...v0.12.0) - 2026-09-11
 
 ### Fixed
