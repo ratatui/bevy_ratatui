@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+## [0.13.0](https://github.com/ratatui/bevy_ratatui/compare/v0.12.0...v0.13.0) - 2026-10-12
+
+### Other
+
+- remove upcoming label from compatibility table ([#117](https://github.com/ratatui/bevy_ratatui/pull/117))
+- update Bevy compatibility table ([#116](https://github.com/ratatui/bevy_ratatui/pull/116))
+- upgraded to bevy 0.20.0 ([#115](https://github.com/ratatui/bevy_ratatui/pull/115))
+
 ## [0.12.0](https://github.com/ratatui/bevy_ratatui/compare/v0.11.1...v0.12.0) - 2026-09-11
 
 ### Fixed
