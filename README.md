@@ -114,7 +114,7 @@ There are also a handful of features relating to running Bevy in `no_std` mode.
 
 | bevy | bevy_ratatui      |
 |------|-------------------|
-| 0.20 | 0.13.0 (upcoming) |
+| 0.20 | 0.13.0            |
 | 0.19 | 0.11.2–0.12.0     |
 | 0.18 | 0.11.0–0.11.1     |
 | 0.17 | 0.10              |
