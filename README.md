@@ -75,59 +75,15 @@ example, see the [snake example](examples/snake/README.md).
 
 - `windowed`: Render your ratatui application in a window instead of the
   terminal buffer. Reference the `demo` example for how to set up a Bevy
-  project to handle either mode. The buffer is rendered on the GPU by
-  [bevy_terminal](https://github.com/gold-silver-copper/bevy_terminal) using
-  Bevy's built-in default monospace font (ASCII coverage, paired with
-  `bevy_terminal`'s procedural box-drawing, block, shade, and braille sprites,
-  with no dependency on system font discovery); the grid fills the window and
-  follows its scale factor. For non-ASCII Unicode glyphs (such as scrollbar
-  arrows, accented Latin, or Nerd Fonts) or dedicated bold/italic faces, supply
-  your own font asset via `FontFaces`. This enables only the Bevy features the
-  windowed backend itself needs — windowing, rendering, text (with
-  `default_font`), and `bevy_ui`. If your app also wants audio, 3D, scenes,
-  gamepads or image codecs, enable those on your own `bevy` dependency; Cargo
-  features are additive.
-
-  The terminal's appearance is a `TerminalRenderConfig` component on the
-  `RatatuiContext` resource's entity. Configure it at startup in `PostStartup`
-  (after `RatatuiContext` is inserted in `Startup`), or swap fonts and sizing
-  live in any `Update` system while the terminal is running:
-
-  ```rust,ignore
-  use bevy::prelude::*;
-  use bevy_ratatui::{
-      RatatuiContext,
-      windowed::{FontFaces, TerminalRenderConfig, TerminalSizing},
-  };
-
-  // Register with `.add_systems(PostStartup, configure_terminal)` (or run in `Update` to swap live):
-  fn configure_terminal(
-      asset_server: Res<AssetServer>,
-      mut config: Single<&mut TerminalRenderConfig, With<RatatuiContext>>,
-  ) {
-      config.sizing = TerminalSizing::font(24.0);
-      // Dynamically loaded from assets/:
-      config.font = FontFaces::regular(asset_server.load("fonts/MyFont.ttf"));
-      // Or embedded into the binary with `fonts.add(Font::from_bytes(include_bytes!(...).to_vec()))`.
-  }
-  ```
-
-  For a full runnable showcase loading distinct monospace families per import
-  method — JetBrains Mono (4 faces, dynamic `AssetServer`), Hack (4 faces,
-  embedded `include_bytes!`), DejaVu Sans Mono (single-face with `synthesize`
-  on/off), Cascadia Mono (single-face), and Bevy's `default_font` — paired with
-  bundled CJK, Color Emoji, RTL, symbol, and Nerd Font fallback chains via
-  `FontSource::list`, see [windowed_fonts](examples/windowed_fonts.rs)
-  (`cargo run --example windowed_fonts --features windowed`). Licenses for the
-  bundled example fonts are in `assets/fonts/`.
-
-- `system_fonts`: Opt-in OS system font discovery for the `windowed` backend
-  (enables `bevy_terminal_ratatui/system_fonts` / `bevy/system_font_discovery`;
-  requires `fontconfig` development libraries on Linux). Enables generic
-  sources like `FontSource::monospace()`, named installed families like
-  `FontSource::families(...)`, and automatic OS script fallback. See
-  [windowed_system_fonts](examples/windowed_system_fonts.rs)
-  (`cargo run --example windowed_system_fonts --features windowed,system_fonts`).
+  project to handle either mode, or [windowed_fonts](examples/windowed_fonts.rs)
+  to configure custom fonts and sizing on `TerminalRenderConfig`. Rendered on
+  the GPU via
+  [bevy_terminal](https://github.com/gold-silver-copper/bevy_terminal); enables
+  only the Bevy features the windowed backend needs — windowing, rendering, text
+  (`default_font`), and `bevy_ui` (Cargo features are additive).
+- `system_fonts`: Opt-in OS system font discovery for `windowed` (requires
+  `fontconfig` on Linux). See
+  [windowed_system_fonts](examples/windowed_system_fonts.rs).
 
 There are also a handful of features relating to running Bevy in `no_std` mode.
 
