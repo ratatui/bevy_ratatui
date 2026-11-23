@@ -14,7 +14,7 @@ keywords = ["cli", "ratatui", "terminal", "tui", "bevy"]
 bevy = { version = "0.20.0", default-features = false }
 bitflags = "2.8"
 ratatui = { version = "0.30", default-features = false }
-soft_ratatui = { version = "0.1", optional = true }
+bevy_terminal_ratatui = { version = "0.9", default-features = false, optional = true }
 tracing = "0.1"
 
 [dev-dependencies]
@@ -55,13 +55,17 @@ debug-assertions = false
 [features]
 default = ["std", "async_executor", "crossterm", "keyboard", "mouse"]
 crossterm = ["ratatui/crossterm"]
-# The windowed backend software-renders the Ratatui buffer into a texture and
-# displays it in a window. It needs a render stack and a window, but none of
-# Bevy's audio, 3D, animation, gizmo, picking, scene or gamepad features.
-# Downstream crates that want those can enable them on their own `bevy`
-# dependency; Cargo features are additive.
+# The windowed backend renders the Ratatui buffer into a texture on the GPU
+# with `bevy_terminal` and displays it in a window, using Bevy's built-in
+# default monospace font (ASCII coverage, paired with procedural box-drawing,
+# block, shade, and braille sprites; no system font discovery required).
+# Applications can supply embedded or dynamically loaded font assets for broader
+# Unicode coverage or dedicated bold/italic faces at creation or swap them live.
+# It needs a render stack and a window, but none of Bevy's audio, 3D, animation,
+# gizmo, picking, scene or gamepad features. Downstream crates that want those
+# can enable them on their own `bevy` dependency; Cargo features are additive.
 windowed = [
-  "dep:soft_ratatui",
+  "dep:bevy_terminal_ratatui",
   # platform
   "bevy/std",
   "bevy/multi_threaded",
@@ -76,6 +80,8 @@ windowed = [
   "bevy/bevy_core_pipeline",
   "bevy/bevy_asset",
   "bevy/bevy_image",
+  "bevy/bevy_text",
+  "bevy/default_font",
   # `ImageNode` / `Node` used to present the texture
   "bevy/bevy_ui",
   "bevy/bevy_ui_render",
