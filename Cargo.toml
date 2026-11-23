@@ -14,7 +14,7 @@ keywords = ["cli", "ratatui", "terminal", "tui", "bevy"]
 bevy = { version = "0.20.0", default-features = false }
 bitflags = "2.8"
 ratatui = { version = "0.30", default-features = false }
-bevy_terminal_ratatui = { version = "0.10.0", default-features = false, optional = true }
+bevy_terminal_ratatui = { version = "0.10.2", default-features = false, optional = true }
 tracing = "0.1"
 
 [dev-dependencies]

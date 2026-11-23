@@ -1,7 +1,4 @@
-use bevy::{
-    camera::RenderTarget, prelude::*, render::renderer::RenderDevice, ui::UiSystems,
-    window::PrimaryWindow,
-};
+use bevy::{camera::RenderTarget, prelude::*, ui::UiSystems, window::PrimaryWindow};
 use bevy_terminal_ratatui::prelude::*;
 
 use crate::RatatuiContext;
@@ -106,16 +103,17 @@ fn follow_window_scale(
     }
 }
 
-/// Resizes the grid to fill the window, at the cell size measured for the last frame.
+/// Resizes the grid to fill the window, at the cell the terminal measured.
 ///
-/// Only the backend's grid is resized, which keeps what is drawn in the cells both sizes share:
-/// Ratatui adopts the new size, and clears, on its next draw. An application that draws only
-/// when its state changes keeps its last frame until then.
+/// The cell is measured whatever the grid's size, so a grid too large for a texture (on the
+/// first frame, or after a jump in font size) is fitted like any other. The backend keeps what
+/// is drawn through any number of resizes: Ratatui adopts the new size, and clears, on its next
+/// draw, and an application that draws only when its state changes keeps its last frame until
+/// then.
 fn fit_to_window(
     window: Single<&Window, With<PrimaryWindow>>,
     ui_scale: Option<Res<UiScale>>,
     texture: Single<&TerminalTexture, With<RatatuiContext>>,
-    device: Option<Res<RenderDevice>>,
     mut context: ResMut<RatatuiContext>,
 ) {
     let window_size = window.resolution.physical_size().as_vec2();
@@ -123,33 +121,17 @@ fn fit_to_window(
     if window_size.min_element() <= 0.0 {
         return;
     }
-    let current = context.backend().grid().size();
-    let Some(geometry) = texture.measured() else {
-        // Recover from an oversized grid (whether on frame 1 or after a font-size jump) by
-        // shrinking to 1×1 so the next sync measures the new cell size and refills the window.
-        if matches!(
-            texture.status(),
-            TerminalStatus::Failed(TerminalFailure::TextureTooLarge)
-        ) && current != GridSize::new(1, 1)
-        {
-            context.backend_mut().resize(1, 1);
-        }
+    let Some(cell) = texture.cell() else {
         return;
     };
-    // Geometry for another grid size was measured before the last resize.
-    if geometry.grid() != current {
-        return;
-    }
     // The window in the pixels the terminal is rasterized in: its own physical pixels, unless
     // `bevy_terminal` clamped the scale. Whole pixels divide into whole cells exactly, which
     // sizes in UI pixels do not at fractional scales.
-    let raster_per_window = geometry.raster_scale() / ui_scale_factor(&window, ui_scale.as_deref());
-    // A window larger than a texture can be is filled as far as one reaches, rather than asking
-    // for a grid that cannot be drawn. `bevy_terminal` assumes the same limit without a device.
-    let limit = device.map_or(8192, |device| device.limits().max_texture_dimension_2d);
-    let available = (window_size * raster_per_window).min(Vec2::splat(limit as f32));
-    let grid = grid_for(available, geometry.physical_cell_size());
-    if grid != current {
+    let raster_per_window = cell.raster_scale() / ui_scale_factor(&window, ui_scale.as_deref());
+    // A window larger than a texture can be is filled as far as one reaches.
+    let grid = cell.grid_for(window_size * raster_per_window);
+    // Compared first, so that an unchanged context is not marked changed.
+    if grid != context.backend().grid().size() {
         context.backend_mut().resize(grid.width, grid.height);
     }
 }
@@ -337,6 +319,41 @@ mod tests {
     }
 
     #[test]
+    fn a_window_dragged_narrower_and_back_keeps_its_frame() {
+        let mut app = headless_windowed_app();
+        for _ in 0..4 {
+            app.update();
+        }
+        let line = "0123456789".repeat(20);
+        let draw = |app: &mut App| {
+            let mut context = app.world_mut().resource_mut::<RatatuiContext>();
+            context
+                .draw(|frame| frame.render_widget(line.as_str(), frame.area()))
+                .expect("draw");
+            context.backend().grid().row_text(0)
+        };
+        let whole = draw(&mut app);
+        assert!(!whole.ends_with(' '), "the line fills the row: {whole:?}");
+        // Two resizes with no draw between them, as an application that draws on change sees.
+        for width in [200, 640] {
+            app.world_mut()
+                .query_filtered::<&mut Window, With<PrimaryWindow>>()
+                .single_mut(app.world_mut())
+                .expect("primary window")
+                .resolution
+                .set_physical_resolution(width, 400);
+            app.update();
+        }
+        let shown = |app: &App| {
+            let context = app.world().resource::<RatatuiContext>();
+            context.backend().grid().row_text(0)
+        };
+        assert_eq!(shown(&app), whole, "the frame is whole before any draw");
+        // Ratatui takes the same frame to be on screen already and writes nothing.
+        assert_eq!(draw(&mut app), whole);
+    }
+
+    #[test]
     fn a_fractional_scale_fills_every_column_that_fits() {
         let mut app = headless_windowed_app();
         let mut window = app
@@ -396,8 +413,7 @@ mod tests {
             &TerminalStatus::Failed(TerminalFailure::TextureTooLarge)
         );
 
-        // Next frames shrink to 1x1, measure the 200px cell, and fit the 640x400 window.
-        app.update();
+        // The 200px cell was measured all the same, so the next frame fits the 640x400 window.
         app.update();
         let texture = app
             .world_mut()
@@ -434,7 +450,6 @@ mod tests {
             &TerminalStatus::Failed(TerminalFailure::TextureTooLarge)
         );
 
-        app.update();
         app.update();
         let texture = app
             .world_mut()

@@ -120,8 +120,9 @@ pub mod windowed {
     pub use bevy_terminal_ratatui::RatatuiBackend;
     /// Renderer configuration and inspection types for the windowed terminal.
     pub use bevy_terminal_ratatui::prelude::{
-        BlinkConfig, CursorConfig, CursorStyle, FontFaces, FontHinting, FontSource, GridSize,
-        RasterConfig, TerminalFailure, TerminalGeometry, TerminalRenderConfig, TerminalSizing,
-        TerminalStats, TerminalStatus, TerminalSystems, TerminalTexture, TerminalTheme,
+        BlinkConfig, CellGeometry, CursorConfig, CursorStyle, FontFaces, FontHinting, FontSource,
+        GridSize, RasterConfig, TerminalFailure, TerminalGeometry, TerminalRenderConfig,
+        TerminalSizing, TerminalStats, TerminalStatus, TerminalSystems, TerminalTexture,
+        TerminalTheme,
     };
 }
