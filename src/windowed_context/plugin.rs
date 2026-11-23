@@ -1,4 +1,8 @@
-use bevy::{camera::RenderTarget, prelude::*, ui::UiSystems, window::PrimaryWindow};
+use bevy::{
+    prelude::*,
+    ui::{DefaultUiCamera, UiSystems},
+    window::PrimaryWindow,
+};
 use bevy_terminal_ratatui::prelude::*;
 
 use crate::RatatuiContext;
@@ -18,20 +22,9 @@ pub struct WindowedPlugin;
 
 impl Plugin for WindowedPlugin {
     fn build(&self, app: &mut App) {
-        // Default to Bevy's built-in monospace font asset (no system font discovery).
-        // Registered before `RatatuiSourcePlugin` so user configs set at creation or runtime
-        // are never overwritten.
-        let _ = app
-            .world_mut()
-            .try_register_required_components_with::<RatatuiContext, TerminalRenderConfig>(|| {
-                TerminalRenderConfig {
-                    font: FontFaces::regular(Handle::<Font>::default()),
-                    ..default()
-                }
-            });
-
         app.add_plugins(RatatuiSourcePlugin::<RatatuiContext>::default())
-            .add_systems(PostStartup, setup)
+            // After every startup schedule, so a camera spawned in any of them is seen.
+            .add_systems(PreUpdate, setup.run_if(run_once))
             // Before any `Update` system draws, so a resize never clears a frame already drawn.
             .add_systems(PreUpdate, (follow_window_scale, fit_to_window))
             .add_systems(
@@ -60,13 +53,11 @@ impl RatatuiSource for RatatuiContext {
 #[derive(Component)]
 struct TerminalView;
 
-/// Spawns a default 2D camera (if no camera drawing to a window was spawned during `Startup`;
-/// one drawing to an image shows nothing) and the UI node showing the terminal.
-fn setup(mut commands: Commands, cameras: Query<&RenderTarget, With<Camera>>) {
-    if !cameras
-        .iter()
-        .any(|target| matches!(target, RenderTarget::Window(_)))
-    {
+/// Spawns the UI node showing the terminal, and a 2D camera unless the application spawned one
+/// that Bevy UI draws to by default: one on the primary window, or marked `IsDefaultUiCamera`.
+/// A camera on another window or an image would show nothing.
+fn setup(mut commands: Commands, ui_camera: DefaultUiCamera) {
+    if ui_camera.get().is_none() {
         commands.spawn(Camera2d);
     }
     commands.spawn((
@@ -377,6 +368,49 @@ mod tests {
         let cell = geometry.physical_cell_size().x as u32;
         assert_eq!(1400 % cell, 0, "the window is a whole number of cells wide");
         assert_eq!(u32::from(geometry.grid().width), 1400 / cell);
+    }
+
+    #[test]
+    fn a_camera_on_another_window_does_not_stand_in_for_one_on_the_primary() {
+        use bevy::{camera::RenderTarget, window::WindowRef};
+        let mut app = headless_windowed_app();
+        let other = app.world_mut().spawn(Window::default()).id();
+        app.world_mut()
+            .spawn((Camera2d, RenderTarget::Window(WindowRef::Entity(other))));
+        app.update();
+        app.update();
+        let primary = app
+            .world_mut()
+            .query::<&RenderTarget>()
+            .iter(app.world())
+            .filter(|target| matches!(target, RenderTarget::Window(WindowRef::Primary)))
+            .count();
+        assert_eq!(primary, 1, "a camera for the primary window is spawned");
+    }
+
+    #[test]
+    fn a_camera_spawned_in_the_last_startup_schedule_is_not_duplicated() {
+        let mut app = headless_windowed_app();
+        app.add_systems(PostStartup, |mut commands: Commands| {
+            commands.spawn(Camera2d);
+        });
+        app.update();
+        app.update();
+        let cameras = app
+            .world_mut()
+            .query_filtered::<Entity, With<Camera>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(cameras, 1);
+    }
+
+    #[test]
+    fn a_removed_context_stops_the_terminal_without_a_panic() {
+        let mut app = headless_windowed_app();
+        app.update();
+        app.world_mut().remove_resource::<RatatuiContext>();
+        app.update();
+        app.update();
     }
 
     #[test]
