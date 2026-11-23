@@ -112,12 +112,22 @@ example, see the [snake example](examples/snake/README.md).
   }
   ```
 
-  For a full runnable example loading all four JetBrains Mono faces (regular,
-  bold, italic, and bold-italic) both dynamically via `AssetServer` and from
-  embedded bytes, with live font/size/cursor switching, see
-  [windowed_fonts](examples/windowed_fonts.rs)
-  (`cargo run --example windowed_fonts --features windowed`; JetBrains Mono is
-  licensed under SIL OFL 1.1, see `assets/fonts/jetbrains-mono/OFL.txt`).
+  For a full runnable showcase loading distinct monospace families per import
+  method — JetBrains Mono (4 faces, dynamic `AssetServer`), Hack (4 faces,
+  embedded `include_bytes!`), DejaVu Sans Mono (single-face with `synthesize`
+  on/off), Cascadia Mono (single-face), and Bevy's `default_font` — paired with
+  bundled CJK, Color Emoji, RTL, symbol, and Nerd Font fallback chains via
+  `FontSource::list`, see [windowed_fonts](examples/windowed_fonts.rs)
+  (`cargo run --example windowed_fonts --features windowed`). Licenses for the
+  bundled example fonts are in `assets/fonts/`.
+
+- `system_fonts`: Opt-in OS system font discovery for the `windowed` backend
+  (enables `bevy_terminal_ratatui/system_fonts` / `bevy/system_font_discovery`;
+  requires `fontconfig` development libraries on Linux). Enables generic
+  sources like `FontSource::monospace()`, named installed families like
+  `FontSource::families(...)`, and automatic OS script fallback. See
+  [windowed_system_fonts](examples/windowed_system_fonts.rs)
+  (`cargo run --example windowed_system_fonts --features windowed,system_fonts`).
 
 There are also a handful of features relating to running Bevy in `no_std` mode.
 

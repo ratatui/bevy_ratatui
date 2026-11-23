@@ -1,15 +1,16 @@
-//! Comprehensive windowed font and render verification showcase using JetBrains Mono
-//! (SIL OFL 1.1, see `assets/fonts/jetbrains-mono/OFL.txt`).
+//! Comprehensive windowed font and render verification showcase using bundled monospace fonts
+//! (zero `system_fonts` dependency; see licenses under `assets/fonts/`).
 //!
-//! Demonstrates:
-//! - Loading all four font faces (regular, bold, italic, bold-italic) dynamically via
-//!   `AssetServer` and from embedded bytes via `include_bytes!` + `Font::from_bytes`.
-//! - Live runtime font switching, font-size reflow, and cursor-style switching.
-//! - Visual verification across all 512 modifier combinations, ANSI 16, 256-color cube and
-//!   grayscale ramp, 128-step true-color RGB gradients, underline colors, every box-drawing
-//!   weight and junction, block/quadrant/shade/braille/geometric/legacy-computing symbols,
-//!   broad Unicode blocks (Latin, Greek, Cyrillic, arrows, math, technical, currency,
-//!   combining marks, wide CJK/fullwidth/emoji/RTL/Indic), blinking cursor, and full ASCII.
+//! Demonstrates a distinct monospace family for each font loading method, paired with bundled
+//! fallback chains (`FontSource::list`) for symbols, RTL scripts, CJK, Color Emoji, and Nerd icons:
+//! - **JetBrains Mono** (4 faces): dynamic loading via `AssetServer` + dynamic fallback list
+//! - **Hack** (4 faces): embedded bytes via `include_bytes!` + `Font::from_bytes` + embedded list
+//! - **DejaVu Sans Mono** (regular only): single-face fallback with `synthesize: true` vs `false`
+//! - **Cascadia Mono** (regular only): single-face monospace with native Arabic/Hebrew coverage
+//! - **Bevy `default_font`** (`FiraMono` ASCII subset): built-in baseline with no extra fallbacks
+//!
+//! For OS system font discovery (`FontSource::monospace()`, named system families, and automatic
+//! OS fallback for arbitrary scripts), see `examples/windowed_system_fonts.rs`.
 //!
 //! Run with:
 //! ```sh
@@ -23,7 +24,18 @@
 //! - `↑`/`↓` or `j`/`k`, `PageUp`/`PageDown`, `Home`/`End`, mouse wheel: scroll
 //! - `Q` / `Esc`: quit
 
-use bevy::{app::AppExit, input::mouse::MouseWheel, prelude::*};
+use std::time::Duration;
+
+use bevy::{
+    app::AppExit,
+    input::{
+        ButtonState,
+        keyboard::{Key, KeyboardInput},
+        mouse::MouseWheel,
+    },
+    prelude::*,
+    winit::{UpdateMode, WinitSettings},
+};
 use bevy_ratatui::{
     RatatuiContext, RatatuiPlugins,
     windowed::{
@@ -37,14 +49,20 @@ use ratatui::{
     widgets::{Block, Paragraph},
 };
 
-const EMBEDDED_REGULAR: &[u8] =
-    include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf");
-const EMBEDDED_BOLD: &[u8] =
-    include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.ttf");
-const EMBEDDED_ITALIC: &[u8] =
-    include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-Italic.ttf");
-const EMBEDDED_BOLD_ITALIC: &[u8] =
-    include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-BoldItalic.ttf");
+// Embedded preset: Hack (4 faces) + embedded fallback chain (zero runtime asset files required).
+const EMBEDDED_HACK_REGULAR: &[u8] = include_bytes!("../assets/fonts/hack/Hack-Regular.ttf");
+const EMBEDDED_HACK_BOLD: &[u8] = include_bytes!("../assets/fonts/hack/Hack-Bold.ttf");
+const EMBEDDED_HACK_ITALIC: &[u8] = include_bytes!("../assets/fonts/hack/Hack-Italic.ttf");
+const EMBEDDED_HACK_BOLD_ITALIC: &[u8] = include_bytes!("../assets/fonts/hack/Hack-BoldItalic.ttf");
+const EMBEDDED_FALLBACK_DEJAVU: &[u8] =
+    include_bytes!("../assets/fonts/dejavu-sans-mono/DejaVuSansMono.ttf");
+const EMBEDDED_FALLBACK_CASCADIA: &[u8] =
+    include_bytes!("../assets/fonts/cascadia-mono/CascadiaMono-Regular.ttf");
+const EMBEDDED_FALLBACK_CJK: &[u8] = include_bytes!("../assets/fonts/fidelity/FidelityCJK.otf");
+const EMBEDDED_FALLBACK_EMOJI: &[u8] =
+    include_bytes!("../assets/fonts/fidelity/FidelityColorEmoji.ttf");
+const EMBEDDED_FALLBACK_NERD: &[u8] =
+    include_bytes!("../assets/fonts/fidelity/FidelityNerdSymbols.ttf");
 
 const MIN_FONT_SIZE: f32 = 10.0;
 const MAX_FONT_SIZE: f32 = 48.0;
@@ -84,61 +102,73 @@ const ANSI: [(Color, &str); 16] = [
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum FontPreset {
     #[default]
-    DynamicFourFace,
-    EmbeddedFourFace,
-    RegularSynthesized,
-    RegularExact,
+    DynamicJetBrains,
+    EmbeddedHack,
+    DejaVuSynthesized,
+    DejaVuExact,
+    CascadiaSingle,
     BevyDefault,
 }
 
 impl FontPreset {
     fn next(self) -> Self {
         match self {
-            Self::DynamicFourFace => Self::EmbeddedFourFace,
-            Self::EmbeddedFourFace => Self::RegularSynthesized,
-            Self::RegularSynthesized => Self::RegularExact,
-            Self::RegularExact => Self::BevyDefault,
-            Self::BevyDefault => Self::DynamicFourFace,
+            Self::DynamicJetBrains => Self::EmbeddedHack,
+            Self::EmbeddedHack => Self::DejaVuSynthesized,
+            Self::DejaVuSynthesized => Self::DejaVuExact,
+            Self::DejaVuExact => Self::CascadiaSingle,
+            Self::CascadiaSingle => Self::BevyDefault,
+            Self::BevyDefault => Self::DynamicJetBrains,
         }
     }
 
     fn prev(self) -> Self {
         match self {
-            Self::DynamicFourFace => Self::BevyDefault,
-            Self::EmbeddedFourFace => Self::DynamicFourFace,
-            Self::RegularSynthesized => Self::EmbeddedFourFace,
-            Self::RegularExact => Self::RegularSynthesized,
-            Self::BevyDefault => Self::RegularExact,
+            Self::DynamicJetBrains => Self::BevyDefault,
+            Self::EmbeddedHack => Self::DynamicJetBrains,
+            Self::DejaVuSynthesized => Self::EmbeddedHack,
+            Self::DejaVuExact => Self::DejaVuSynthesized,
+            Self::CascadiaSingle => Self::DejaVuExact,
+            Self::BevyDefault => Self::CascadiaSingle,
         }
     }
 
     fn label(self) -> &'static str {
         match self {
-            Self::DynamicFourFace => "JetBrains Mono (4 faces, dynamic AssetServer)",
-            Self::EmbeddedFourFace => "JetBrains Mono (4 faces, embedded include_bytes!)",
-            Self::RegularSynthesized => "JetBrains Mono (regular only, synthesize: true)",
-            Self::RegularExact => "JetBrains Mono (regular only, synthesize: false)",
-            Self::BevyDefault => "Bevy default_font (FiraMono ASCII subset)",
+            Self::DynamicJetBrains => {
+                "JetBrains Mono (4 faces, dynamic AssetServer + FontSource::list fallbacks)"
+            }
+            Self::EmbeddedHack => {
+                "Hack (4 faces, embedded include_bytes! + embedded FontSource::list)"
+            }
+            Self::DejaVuSynthesized => {
+                "DejaVu Sans Mono (regular only, synthesize: true + fallbacks)"
+            }
+            Self::DejaVuExact => "DejaVu Sans Mono (regular only, synthesize: false + fallbacks)",
+            Self::CascadiaSingle => "Cascadia Mono (regular only, dynamic AssetServer + fallbacks)",
+            Self::BevyDefault => "Bevy default_font (FiraMono ASCII subset, no fallbacks)",
         }
     }
 }
 
 #[derive(Resource)]
 struct FontLibrary {
-    dynamic: FontFaces,
-    embedded: FontFaces,
-    regular_synthesized: FontFaces,
-    regular_exact: FontFaces,
+    dynamic_jetbrains: FontFaces,
+    embedded_hack: FontFaces,
+    dejavu_synthesized: FontFaces,
+    dejavu_exact: FontFaces,
+    cascadia_single: FontFaces,
     bevy_default: FontFaces,
 }
 
 impl FontLibrary {
     fn faces(&self, preset: FontPreset) -> FontFaces {
         match preset {
-            FontPreset::DynamicFourFace => self.dynamic.clone(),
-            FontPreset::EmbeddedFourFace => self.embedded.clone(),
-            FontPreset::RegularSynthesized => self.regular_synthesized.clone(),
-            FontPreset::RegularExact => self.regular_exact.clone(),
+            FontPreset::DynamicJetBrains => self.dynamic_jetbrains.clone(),
+            FontPreset::EmbeddedHack => self.embedded_hack.clone(),
+            FontPreset::DejaVuSynthesized => self.dejavu_synthesized.clone(),
+            FontPreset::DejaVuExact => self.dejavu_exact.clone(),
+            FontPreset::CascadiaSingle => self.cascadia_single.clone(),
             FontPreset::BevyDefault => self.bevy_default.clone(),
         }
     }
@@ -156,13 +186,22 @@ struct DemoState {
 impl Default for DemoState {
     fn default() -> Self {
         Self {
-            preset: FontPreset::DynamicFourFace,
+            preset: FontPreset::DynamicJetBrains,
             font_size: 16.0,
             cursor_style: CursorStyle::Block,
             scroll: 0,
             page_height: 24,
         }
     }
+}
+
+fn with_fallbacks(primary: Handle<Font>, fallbacks: &[Handle<Font>]) -> FontSource {
+    let mut chain = Vec::with_capacity(1 + fallbacks.len());
+    chain.push(FontSource::from(primary));
+    for fallback in fallbacks {
+        chain.push(FontSource::from(fallback.clone()));
+    }
+    FontSource::list(chain)
 }
 
 fn main() {
@@ -178,6 +217,13 @@ fn main() {
             }),
             RatatuiPlugins::default(),
         ))
+        // Reactive desktop pacing: ticks at 8 Hz while focused for smooth cursor/text blinking
+        // and sleeps while unfocused/occluded so Wayland compositors do not report swap-chain
+        // acquisition timeouts.
+        .insert_resource(WinitSettings {
+            focused_mode: UpdateMode::reactive(Duration::from_millis(125)),
+            unfocused_mode: UpdateMode::reactive_low_power(Duration::from_secs(60)),
+        })
         .init_resource::<DemoState>()
         // `RatatuiContext` is inserted during `Startup`, so configure initial fonts in `PostStartup`.
         .add_systems(PostStartup, setup_fonts)
@@ -185,8 +231,9 @@ fn main() {
         .run();
 }
 
-/// Loads all four JetBrains Mono faces both dynamically (via `AssetServer`) and from embedded
-/// bytes, then applies the initial four-face configuration to the terminal.
+/// Loads a distinct monospace family for each import method (dynamic `AssetServer`, embedded
+/// `include_bytes!`, single-face fallback, and Bevy's built-in default font), pairing each
+/// custom preset with bundled fallback chains via `FontSource::list`.
 fn setup_fonts(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -194,59 +241,108 @@ fn setup_fonts(
     state: Res<DemoState>,
     mut config: Single<&mut TerminalRenderConfig, With<RatatuiContext>>,
 ) {
-    let dynamic_regular: Handle<Font> =
-        asset_server.load("fonts/jetbrains-mono/JetBrainsMono-Regular.ttf");
-    let dynamic = FontFaces {
-        regular: FontSource::from(dynamic_regular.clone()),
-        bold: Some(FontSource::from(
+    let dejavu_dyn: Handle<Font> = asset_server.load("fonts/dejavu-sans-mono/DejaVuSansMono.ttf");
+    let cascadia_dyn: Handle<Font> =
+        asset_server.load("fonts/cascadia-mono/CascadiaMono-Regular.ttf");
+    let cjk_dyn: Handle<Font> = asset_server.load("fonts/fidelity/FidelityCJK.otf");
+    let emoji_dyn: Handle<Font> = asset_server.load("fonts/fidelity/FidelityColorEmoji.ttf");
+    let nerd_dyn: Handle<Font> = asset_server.load("fonts/fidelity/FidelityNerdSymbols.ttf");
+
+    let dynamic_fallbacks = [
+        dejavu_dyn.clone(),
+        cascadia_dyn.clone(),
+        cjk_dyn.clone(),
+        emoji_dyn.clone(),
+        nerd_dyn.clone(),
+    ];
+
+    let dynamic_jetbrains = FontFaces {
+        regular: with_fallbacks(
+            asset_server.load("fonts/jetbrains-mono/JetBrainsMono-Regular.ttf"),
+            &dynamic_fallbacks,
+        ),
+        bold: Some(with_fallbacks(
             asset_server.load("fonts/jetbrains-mono/JetBrainsMono-Bold.ttf"),
+            &dynamic_fallbacks,
         )),
-        italic: Some(FontSource::from(
+        italic: Some(with_fallbacks(
             asset_server.load("fonts/jetbrains-mono/JetBrainsMono-Italic.ttf"),
+            &dynamic_fallbacks,
         )),
-        bold_italic: Some(FontSource::from(
+        bold_italic: Some(with_fallbacks(
             asset_server.load("fonts/jetbrains-mono/JetBrainsMono-BoldItalic.ttf"),
+            &dynamic_fallbacks,
         )),
         synthesize: true,
     };
 
-    let embedded = FontFaces {
-        regular: FontSource::from(fonts.add(Font::from_bytes(EMBEDDED_REGULAR.to_vec()))),
-        bold: Some(FontSource::from(
-            fonts.add(Font::from_bytes(EMBEDDED_BOLD.to_vec())),
+    let embedded_fallbacks = [
+        fonts.add(Font::from_bytes(EMBEDDED_FALLBACK_DEJAVU.to_vec())),
+        fonts.add(Font::from_bytes(EMBEDDED_FALLBACK_CASCADIA.to_vec())),
+        fonts.add(Font::from_bytes(EMBEDDED_FALLBACK_CJK.to_vec())),
+        fonts.add(Font::from_bytes(EMBEDDED_FALLBACK_EMOJI.to_vec())),
+        fonts.add(Font::from_bytes(EMBEDDED_FALLBACK_NERD.to_vec())),
+    ];
+
+    let embedded_hack = FontFaces {
+        regular: with_fallbacks(
+            fonts.add(Font::from_bytes(EMBEDDED_HACK_REGULAR.to_vec())),
+            &embedded_fallbacks,
+        ),
+        bold: Some(with_fallbacks(
+            fonts.add(Font::from_bytes(EMBEDDED_HACK_BOLD.to_vec())),
+            &embedded_fallbacks,
         )),
-        italic: Some(FontSource::from(
-            fonts.add(Font::from_bytes(EMBEDDED_ITALIC.to_vec())),
+        italic: Some(with_fallbacks(
+            fonts.add(Font::from_bytes(EMBEDDED_HACK_ITALIC.to_vec())),
+            &embedded_fallbacks,
         )),
-        bold_italic: Some(FontSource::from(
-            fonts.add(Font::from_bytes(EMBEDDED_BOLD_ITALIC.to_vec())),
+        bold_italic: Some(with_fallbacks(
+            fonts.add(Font::from_bytes(EMBEDDED_HACK_BOLD_ITALIC.to_vec())),
+            &embedded_fallbacks,
         )),
         synthesize: true,
     };
 
-    let regular_synthesized = FontFaces {
-        regular: FontSource::from(dynamic_regular.clone()),
+    let dejavu_fallbacks = [
+        cascadia_dyn.clone(),
+        cjk_dyn.clone(),
+        emoji_dyn.clone(),
+        nerd_dyn.clone(),
+    ];
+    let dejavu_source = with_fallbacks(dejavu_dyn.clone(), &dejavu_fallbacks);
+    let dejavu_synthesized = FontFaces {
+        regular: dejavu_source.clone(),
         bold: None,
         italic: None,
         bold_italic: None,
         synthesize: true,
     };
-
-    let regular_exact = FontFaces {
-        regular: FontSource::from(dynamic_regular),
+    let dejavu_exact = FontFaces {
+        regular: dejavu_source,
         bold: None,
         italic: None,
         bold_italic: None,
         synthesize: false,
     };
 
+    let cascadia_fallbacks = [dejavu_dyn, cjk_dyn, emoji_dyn, nerd_dyn];
+    let cascadia_single = FontFaces {
+        regular: with_fallbacks(cascadia_dyn, &cascadia_fallbacks),
+        bold: None,
+        italic: None,
+        bold_italic: None,
+        synthesize: true,
+    };
+
     let bevy_default = FontFaces::regular(Handle::<Font>::default());
 
     let library = FontLibrary {
-        dynamic,
-        embedded,
-        regular_synthesized,
-        regular_exact,
+        dynamic_jetbrains,
+        embedded_hack,
+        dejavu_synthesized,
+        dejavu_exact,
+        cascadia_single,
         bevy_default,
     };
 
@@ -258,6 +354,7 @@ fn setup_fonts(
 }
 
 fn handle_input(
+    mut key_events: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
     mut wheel: MessageReader<MouseWheel>,
     library: Option<Res<FontLibrary>>,
@@ -265,61 +362,70 @@ fn handle_input(
     mut config: Single<&mut TerminalRenderConfig, With<RatatuiContext>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if keys.just_pressed(KeyCode::KeyQ) || keys.just_pressed(KeyCode::Escape) {
-        exit.write(AppExit::Success);
-        return;
-    }
-
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-
-    if let Some(library) = library {
-        if (keys.just_pressed(KeyCode::Tab) && !shift) || keys.just_pressed(KeyCode::KeyF) {
-            state.preset = state.preset.next();
-            config.font = library.faces(state.preset);
-        } else if keys.just_pressed(KeyCode::Tab) && shift {
-            state.preset = state.preset.prev();
-            config.font = library.faces(state.preset);
-        }
-    }
-
-    if keys.just_pressed(KeyCode::Equal) || keys.just_pressed(KeyCode::NumpadAdd) {
-        state.font_size = (state.font_size + FONT_STEP).min(MAX_FONT_SIZE);
-        config.sizing = TerminalSizing::font(state.font_size);
-    }
-
-    if keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::NumpadSubtract) {
-        state.font_size = (state.font_size - FONT_STEP).max(MIN_FONT_SIZE);
-        config.sizing = TerminalSizing::font(state.font_size);
-    }
-
-    if keys.just_pressed(KeyCode::KeyC) {
-        state.cursor_style = match state.cursor_style {
-            CursorStyle::Block => CursorStyle::Bar,
-            CursorStyle::Bar => CursorStyle::Underline,
-            CursorStyle::Underline => CursorStyle::Block,
-        };
-        config.cursor.style = state.cursor_style;
-    }
-
     let page = i32::from(state.page_height.max(1));
     let mut delta: i32 = wheel
         .read()
         .map(|event| (-event.y.round() as i32).clamp(-8, 8))
         .sum();
-    for (key, step) in [
-        (KeyCode::ArrowDown, 1),
-        (KeyCode::KeyJ, 1),
-        (KeyCode::ArrowUp, -1),
-        (KeyCode::KeyK, -1),
-        (KeyCode::PageDown, page),
-        (KeyCode::PageUp, -page),
-        (KeyCode::End, i32::from(u16::MAX)),
-        (KeyCode::Home, -i32::from(u16::MAX)),
-    ] {
-        if keys.just_pressed(key) {
-            delta += step;
+
+    for event in key_events.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+        match &event.logical_key {
+            Key::Escape => {
+                exit.write(AppExit::Success);
+                return;
+            }
+            Key::Character(ch) if ch.eq_ignore_ascii_case("q") => {
+                exit.write(AppExit::Success);
+                return;
+            }
+            Key::Tab => {
+                if let Some(library) = library.as_ref() {
+                    state.preset = if shift {
+                        state.preset.prev()
+                    } else {
+                        state.preset.next()
+                    };
+                    config.font = library.faces(state.preset);
+                }
+            }
+            Key::Character(ch) if ch.eq_ignore_ascii_case("f") => {
+                if let Some(library) = library.as_ref() {
+                    state.preset = state.preset.next();
+                    config.font = library.faces(state.preset);
+                }
+            }
+            Key::Character(ch) if ch.as_str() == "+" || ch.as_str() == "=" => {
+                state.font_size = (state.font_size + FONT_STEP).min(MAX_FONT_SIZE);
+                config.sizing = TerminalSizing::font(state.font_size);
+            }
+            Key::Character(ch) if ch.as_str() == "-" || ch.as_str() == "_" => {
+                state.font_size = (state.font_size - FONT_STEP).max(MIN_FONT_SIZE);
+                config.sizing = TerminalSizing::font(state.font_size);
+            }
+            Key::Character(ch) if ch.eq_ignore_ascii_case("c") => {
+                state.cursor_style = match state.cursor_style {
+                    CursorStyle::Block => CursorStyle::Bar,
+                    CursorStyle::Bar => CursorStyle::Underline,
+                    CursorStyle::Underline => CursorStyle::Block,
+                };
+                config.cursor.style = state.cursor_style;
+            }
+            Key::ArrowDown => delta += 1,
+            Key::Character(ch) if ch.eq_ignore_ascii_case("j") => delta += 1,
+            Key::ArrowUp => delta -= 1,
+            Key::Character(ch) if ch.eq_ignore_ascii_case("k") => delta -= 1,
+            Key::PageDown => delta += page,
+            Key::PageUp => delta -= page,
+            Key::End => delta = i32::from(u16::MAX),
+            Key::Home => delta = -i32::from(u16::MAX),
+            _ => {}
         }
     }
+
     if delta != 0 {
         state.scroll = (i32::from(state.scroll) + delta).clamp(0, i32::from(u16::MAX)) as u16;
     }
@@ -636,19 +742,19 @@ fn build_showcase_lines() -> (Vec<Line<'static>>, u16) {
 
     // 9. Unicode blocks & wide/combining/script samples with guard columns.
     lines.push(heading(
-        " 9. Unicode blocks & scripts (wide cells occupy 2 cols without overlapping '|' guards; coverage depends on active font) ",
+        " 9. Unicode blocks & scripts (wide cells occupy 2 cols without overlapping '|' guards; bundled fallbacks via FontSource::list) ",
     ));
     for text in [
         "|Latin-1  |ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞß| |café naïve résumé über Ångström Łódź ğşİı|",
         "|Greek    |ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ| |αβγδεζηθικλμνξοπρστυφχψω|",
         "|Cyrillic |АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ| |привет мир ёж|",
-        "|Arrows   |← ↑ → ↓ ↔ ↕ ↖ ↗ ↘ ↙| |⇐ ⇑ ⇒ ⇓ ⇔ ↺ ↻ ↵ ⏎|",
-        "|Math/Tech|± × ÷ ≠ ≤ ≥ ≈ ≡ ∞ ∑ ∏ √ ∫ ∂ ∆ ∇ ∈ ∉ ∩ ∪ ⊂ ⊃ ∀ ∃ ∧ ∨ ¬| |⌘ ⌥ ⇧ ⌃ ⌫ ⎋|",
+        "|Arrows   |← ↑ → ↓ ↔ ↕ ↖ ↗ ↘ ↙| |⇐ ⇑ ⇒ ⇓ ⇔ ↺ ↻ ↵ ↩|",
+        "|Math/Tech|± × ÷ ≠ ≤ ≥ ≈ ≡ ∞ ∑ ∏ √ ∫ ∂ ∆ ∇ ∈ ∉ ∩ ∪ ⊂ ⊃ ∀ ∃ ∧ ∨ ¬| |⌈ ⌉ ⌊ ⌋ ⊕ ⊗ ⊥ ⊢|",
         "|Punct/Sym|© ® ™ ° µ ¶ § † ‡ • ◦ … – — « » ‹ › “ ” ‘ ’| |€ £ ¥ ¢ ₿| |☐ ☑ ☒ ♠ ♣ ♥ ♦ ★ ☆ ♪ ♫|",
         "|Combining|e\u{301}|A\u{30a}|n\u{303}|o\u{308}\u{304}|Z\u{330}\u{301}|  precomposed: |é|Å|ñ|  (must stay 1 cell each)",
-        "|Wide CJK |汉字|日本語|한글|中文测试|  |ｆｕｌｌｗｉｄｔｈ|  guards: |0123456789|",
+        "|Wide CJK |汉字|日本語|한글|  |ｆｕｌｌｗｉｄｔｈ|  guards: |0123456789|",
         "|Mixed    |a汉b字c日d本e語f|  |narrow|wide|narrow|  the guards | must | stay | aligned |",
-        "|Emoji/RTL|🙂|🚀|🎉|❤️|✅|⚠️|  |שלום עולם|مرحبا بالعالم|  |नमस्ते|தமிழ்|ไทย|  (font-dependent)",
+        "|Emoji/RTL|🙂|🚀|🎉|❤️|☕️|👍🏽|🇺🇸|👩‍💻|🏳️‍🌈|  |שלום עולם|مرحبا بالعالم|  Nerd: |☰||||",
     ] {
         lines.push(Line::from(text));
     }
@@ -669,8 +775,8 @@ fn build_showcase_lines() -> (Vec<Line<'static>>, u16) {
         ),
         ("🚀🙂", Style::new().bg(Color::Indexed(238))),
         ("한글", Style::new().add_modifier(Modifier::REVERSED)),
-        ("中文", Style::new().add_modifier(Modifier::CROSSED_OUT)),
-        ("測試", Style::new().add_modifier(Modifier::DIM)),
+        ("日本語", Style::new().add_modifier(Modifier::CROSSED_OUT)),
+        ("🎉☕️", Style::new().add_modifier(Modifier::DIM)),
     ] {
         styled_wide.push(Span::styled(text, style));
         styled_wide.push(Span::raw("|"));
