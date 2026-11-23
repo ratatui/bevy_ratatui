@@ -39,6 +39,11 @@ name = "snake"
 path = "examples/snake/main.rs"
 test = true
 
+[[example]]
+name = "windowed_fonts"
+path = "examples/windowed_fonts.rs"
+required-features = ["windowed"]
+
 # Enable a small amount of optimization in debug mode
 [profile.dev]
 opt-level = 1

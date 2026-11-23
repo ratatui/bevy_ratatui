@@ -112,6 +112,13 @@ example, see the [snake example](examples/snake/README.md).
   }
   ```
 
+  For a full runnable example loading all four JetBrains Mono faces (regular,
+  bold, italic, and bold-italic) both dynamically via `AssetServer` and from
+  embedded bytes, with live font/size/cursor switching, see
+  [windowed_fonts](examples/windowed_fonts.rs)
+  (`cargo run --example windowed_fonts --features windowed`; JetBrains Mono is
+  licensed under SIL OFL 1.1, see `assets/fonts/jetbrains-mono/OFL.txt`).
+
 There are also a handful of features relating to running Bevy in `no_std` mode.
 
 ## see also
