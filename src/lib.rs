@@ -118,8 +118,8 @@ pub mod windowed {
     pub use super::windowed_context::plugin::WindowedPlugin;
     /// Renderer configuration and inspection types for the windowed terminal.
     pub use bevy_terminal_ratatui::prelude::{
-        BlinkConfig, CursorConfig, CursorStyle, FontFaces, FontHinting, FontSource, RasterConfig,
-        TerminalFailure, TerminalGeometry, TerminalRenderConfig, TerminalSizing, TerminalStats,
-        TerminalStatus, TerminalTexture, TerminalTheme,
+        BlinkConfig, CursorConfig, CursorStyle, FontFaces, FontHinting, FontSource, GridSize,
+        RasterConfig, TerminalFailure, TerminalGeometry, TerminalRenderConfig, TerminalSizing,
+        TerminalStats, TerminalStatus, TerminalSystems, TerminalTexture, TerminalTheme,
     };
 }

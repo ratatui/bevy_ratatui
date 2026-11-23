@@ -82,6 +82,9 @@ example, see the [snake example](examples/snake/README.md).
   [bevy_terminal](https://github.com/gold-silver-copper/bevy_terminal); enables
   only the Bevy features the windowed backend needs — windowing, rendering, text
   (`default_font`), and `bevy_ui` (Cargo features are additive).
+- `scrolling-regions`: Enable Ratatui's scrolling regions for every backend.
+  Use this rather than `ratatui/scrolling-regions`, which leaves the windowed
+  backend without the methods Ratatui then requires.
 
 There are also a handful of features relating to running Bevy in `no_std` mode.
 

@@ -410,7 +410,7 @@ fn handle_input(
                 state.cursor_style = match state.cursor_style {
                     CursorStyle::Block => CursorStyle::Bar,
                     CursorStyle::Bar => CursorStyle::Underline,
-                    CursorStyle::Underline => CursorStyle::Block,
+                    _ => CursorStyle::Block,
                 };
                 config.cursor.style = state.cursor_style;
             }

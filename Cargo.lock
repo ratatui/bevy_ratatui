@@ -1711,18 +1711,18 @@ dependencies = [
 
 [[package]]
 name = "bevy_terminal"
-version = "0.9.2"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e301b564e80e4997cce0915b41711f157da686873bacea19d9d21a06f550bb33"
+checksum = "db19a7cd780bc9dfccde688ef93ee4d56feb32a1ad4037ba39b4e9f4d0d8c593"
 dependencies = [
  "bevy",
 ]
 
 [[package]]
 name = "bevy_terminal_ratatui"
-version = "0.9.2"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70b30cfc35fa1df75a2e4609daba962b1f15b50ba6b416ee8fe688272a64dc8f"
+checksum = "27d23819ff218fd4fcfa4bf58ad2e649fc4af00c182f8eeca5fb01b6b9b5a605"
 dependencies = [
  "bevy",
  "bevy_terminal",
@@ -4136,6 +4136,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "numtoa"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6aa2c4e539b869820a2b82e1aef6ff40aa85e65decdd5185e83fb4b1249cd00f"
+
+[[package]]
 name = "objc-sys"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5057,6 +5063,7 @@ dependencies = [
  "ratatui-core",
  "ratatui-crossterm",
  "ratatui-termina",
+ "ratatui-termion",
  "ratatui-termwiz",
  "ratatui-widgets",
  "serde",
@@ -5105,6 +5112,17 @@ dependencies = [
  "instability",
  "ratatui-core",
  "termina",
+]
+
+[[package]]
+name = "ratatui-termion"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87c732202fa5a71a9da0991013f0853e53f87048f45198e3a1ca3ee722accc2f"
+dependencies = [
+ "instability",
+ "ratatui-core",
+ "termion",
 ]
 
 [[package]]
@@ -5765,6 +5783,16 @@ dependencies = [
  "nom 7.1.3",
  "phf",
  "phf_codegen",
+]
+
+[[package]]
+name = "termion"
+version = "4.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f44138a9ae08f0f502f24104d82517ef4da7330c35acd638f1f29d3cd5475ecb"
+dependencies = [
+ "libc",
+ "numtoa",
 ]
 
 [[package]]

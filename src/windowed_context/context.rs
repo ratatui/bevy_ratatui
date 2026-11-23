@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use bevy::prelude::*;
 use bevy_terminal_ratatui::RatatuiBackend;
 use ratatui::Terminal;
@@ -10,14 +8,8 @@ use super::plugin::WindowedPlugin;
 
 /// Ratatui context that draws into a cell grid which [`WindowedPlugin`] renders to a texture and
 /// displays in a window, instead of drawing to a terminal buffer.
-#[derive(Deref, DerefMut)]
+#[derive(Debug, Deref, DerefMut)]
 pub struct WindowedContext(Terminal<RatatuiBackend>);
-
-impl Debug for WindowedContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "WindowedContext()")
-    }
-}
 
 impl TerminalContext<RatatuiBackend> for WindowedContext {
     fn init() -> Result<Self> {

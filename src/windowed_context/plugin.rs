@@ -1,4 +1,7 @@
-use bevy::{prelude::*, ui::UiSystems, window::PrimaryWindow};
+use bevy::{
+    camera::RenderTarget, prelude::*, render::renderer::RenderDevice, ui::UiSystems,
+    window::PrimaryWindow,
+};
 use bevy_terminal_ratatui::prelude::*;
 
 use crate::RatatuiContext;
@@ -58,10 +61,13 @@ impl RatatuiSource for RatatuiContext {
 #[derive(Component)]
 struct TerminalView;
 
-/// Spawns a default 2D camera (if no camera was spawned during `Startup`) and the UI node showing
-/// the terminal.
-fn setup(mut commands: Commands, cameras: Query<(), With<Camera>>) {
-    if cameras.is_empty() {
+/// Spawns a default 2D camera (if no camera drawing to a window was spawned during `Startup`;
+/// one drawing to an image shows nothing) and the UI node showing the terminal.
+fn setup(mut commands: Commands, cameras: Query<&RenderTarget, With<Camera>>) {
+    if !cameras
+        .iter()
+        .any(|target| matches!(target, RenderTarget::Window(_)))
+    {
         commands.spawn(Camera2d);
     }
     commands.spawn((
@@ -76,8 +82,14 @@ fn setup(mut commands: Commands, cameras: Query<(), With<Camera>>) {
 }
 
 /// The scale Bevy UI applies to this window: one logical UI pixel is this many physical pixels.
+/// A scale that is not a positive number counts as one, as `bevy_terminal` rasterizes it.
 fn ui_scale_factor(window: &Window, ui_scale: Option<&UiScale>) -> f32 {
-    window.scale_factor() * ui_scale.map_or(1.0, |scale| scale.0)
+    let scale = window.scale_factor() * ui_scale.map_or(1.0, |scale| scale.0);
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
 }
 
 /// Rasterizes the terminal at the scale the UI displays it, so text stays sharp on HiDPI displays.
@@ -97,6 +109,7 @@ fn fit_to_window(
     window: Single<&Window, With<PrimaryWindow>>,
     ui_scale: Option<Res<UiScale>>,
     texture: Single<&TerminalTexture, With<RatatuiContext>>,
+    device: Option<Res<RenderDevice>>,
     mut context: ResMut<RatatuiContext>,
 ) -> Result {
     let current = context.backend().grid().size();
@@ -125,6 +138,14 @@ fn fit_to_window(
         return Ok(());
     }
     let grid = grid_for(available, geometry.cell_size());
+    // A window larger than a texture can be is filled as far as one reaches, rather than asking
+    // for a grid that cannot be drawn. `bevy_terminal` assumes the same limit without a device.
+    let limit = device.map_or(8192, |device| device.limits().max_texture_dimension_2d);
+    let drawable = grid_for(Vec2::splat(limit as f32), geometry.physical_cell_size());
+    let grid = GridSize::new(
+        grid.width.min(drawable.width),
+        grid.height.min(drawable.height),
+    );
     if grid != current {
         context.backend_mut().resize(grid.width, grid.height);
         context.autoresize()?;
@@ -259,6 +280,38 @@ mod tests {
             "swapped font should reach Ready status, got {:?}",
             texture.status()
         );
+    }
+
+    #[test]
+    fn a_window_larger_than_a_texture_settles_on_the_largest_drawable_grid() {
+        let mut app = headless_windowed_app();
+        app.world_mut()
+            .query_filtered::<&mut Window, With<PrimaryWindow>>()
+            .single_mut(app.world_mut())
+            .expect("primary window")
+            .resolution
+            .set_physical_resolution(20_000, 400);
+        let status = |app: &mut App| {
+            app.update();
+            app.world_mut()
+                .query_filtered::<&TerminalTexture, With<RatatuiContext>>()
+                .single(app.world())
+                .expect("terminal texture attached")
+                .status()
+                .clone()
+        };
+        for _ in 0..6 {
+            status(&mut app);
+        }
+        let settled = status(&mut app);
+        let geometry = settled.clone();
+        let TerminalStatus::Ready(geometry) = geometry else {
+            panic!("expected Ready status, got {settled:?}");
+        };
+        assert!(geometry.size().x <= 8192 && geometry.size().x > 8192 - 64);
+        for _ in 0..4 {
+            assert_eq!(status(&mut app), settled, "the grid keeps changing");
+        }
     }
 
     #[test]
