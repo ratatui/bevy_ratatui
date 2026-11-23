@@ -47,7 +47,7 @@ required-features = ["windowed"]
 [[example]]
 name = "windowed_system_fonts"
 path = "examples/windowed_system_fonts.rs"
-required-features = ["windowed", "system_fonts"]
+required-features = ["windowed"]
 
 # Enable a small amount of optimization in debug mode
 [profile.dev]
@@ -96,11 +96,6 @@ windowed = [
   "bevy/bevy_ui",
   "bevy/bevy_ui_render",
 ]
-# Opt-in OS system font discovery for the windowed backend (forwards
-# `bevy_terminal_ratatui/system_fonts` -> `bevy/system_font_discovery`, which
-# links `fontconfig` on Linux). Disabled by default so `windowed` stays
-# self-contained with Bevy's built-in font or application-supplied font assets.
-system_fonts = ["bevy_terminal_ratatui?/system_fonts"]
 keyboard = ["bevy/keyboard"]
 mouse = ["bevy/mouse"]
 

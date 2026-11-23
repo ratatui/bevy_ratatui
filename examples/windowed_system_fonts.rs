@@ -1,14 +1,17 @@
 //! Opt-in OS system font discovery showcase for the windowed backend.
 //!
-//! Unlike `windowed_fonts` (which bundles font files and has zero `system_fonts` dependency),
-//! this example enables the `system_fonts` feature (`bevy_terminal_ratatui/system_fonts` ->
-//! `bevy/system_font_discovery`) so the OS font catalog resolves generic monospace families,
-//! named installed monospace families, and automatic cross-script fallbacks (CJK, Emoji, RTL,
-//! Indic, Thai) with no bundled font assets required.
+//! Unlike `windowed_fonts` (which bundles font files and has zero system-font dependency),
+//! this example enables `bevy/system_font_discovery` directly via Cargo's additive features so
+//! the OS font catalog resolves generic monospace families, named installed monospace families,
+//! and automatic cross-script fallbacks (CJK, Emoji, RTL, Indic, Thai) with no bundled font
+//! assets required.
+//!
+//! In a downstream crate, enable `features = ["system_font_discovery"]` on your own `bevy`
+//! dependency alongside `bevy_ratatui = { features = ["windowed"] }`.
 //!
 //! Run with:
 //! ```sh
-//! cargo run --example windowed_system_fonts --features windowed,system_fonts
+//! cargo run --example windowed_system_fonts --features windowed,bevy/system_font_discovery
 //! ```
 //!
 //! Keys:
@@ -31,7 +34,8 @@ use bevy::{
 use bevy_ratatui::{
     RatatuiContext, RatatuiPlugins,
     windowed::{
-        CursorStyle, FontFaces, FontSource, TerminalRenderConfig, TerminalSizing, TerminalTexture,
+        CursorStyle, FontFaces, FontSource, TerminalFailure, TerminalRenderConfig, TerminalSizing,
+        TerminalStatus, TerminalTexture,
     },
 };
 use ratatui::{
@@ -221,7 +225,21 @@ fn draw_demo(
     state: Res<DemoState>,
     texture: Single<&TerminalTexture, With<RatatuiContext>>,
     mut context: ResMut<RatatuiContext>,
+    mut warned_missing_discovery: Local<bool>,
 ) -> Result {
+    if !*warned_missing_discovery
+        && matches!(
+            texture.status(),
+            TerminalStatus::Failed(TerminalFailure::ShapingFailed)
+        )
+    {
+        *warned_missing_discovery = true;
+        warn!(
+            "No system fonts found; run with `--features windowed,bevy/system_font_discovery` \
+             (or enable `bevy/system_font_discovery` in your Cargo.toml)."
+        );
+    }
+
     let metrics = match texture.measured() {
         Some(geometry) => format!(
             "{}×{} cells · cell {:.1}×{:.1} px · scale {:.2}×",
@@ -243,7 +261,7 @@ fn draw_demo(
         .areas(frame.area());
 
         let header_block = Block::bordered()
-            .title(" bevy_ratatui · System Font Discovery (`--features windowed,system_fonts`) ")
+            .title(" bevy_ratatui · System Font Discovery (`--features windowed,bevy/system_font_discovery`) ")
             .border_style(Style::new().fg(Color::Cyan));
         let header_lines = vec![
             Line::from(vec![

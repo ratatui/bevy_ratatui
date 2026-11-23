@@ -75,15 +75,13 @@ example, see the [snake example](examples/snake/README.md).
 
 - `windowed`: Render your ratatui application in a window instead of the
   terminal buffer. Reference the `demo` example for how to set up a Bevy
-  project to handle either mode, or [windowed_fonts](examples/windowed_fonts.rs)
-  to configure custom fonts and sizing on `TerminalRenderConfig`. Rendered on
-  the GPU via
+  project to handle either mode, [windowed_fonts](examples/windowed_fonts.rs)
+  for custom font assets and sizing on `TerminalRenderConfig`, or
+  [windowed_system_fonts](examples/windowed_system_fonts.rs) with
+  `bevy/system_font_discovery` for OS font discovery. Rendered on the GPU via
   [bevy_terminal](https://github.com/gold-silver-copper/bevy_terminal); enables
   only the Bevy features the windowed backend needs — windowing, rendering, text
   (`default_font`), and `bevy_ui` (Cargo features are additive).
-- `system_fonts`: Opt-in OS system font discovery for `windowed` (requires
-  `fontconfig` on Linux). See
-  [windowed_system_fonts](examples/windowed_system_fonts.rs).
 
 There are also a handful of features relating to running Bevy in `no_std` mode.
 
