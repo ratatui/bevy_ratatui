@@ -8,8 +8,15 @@ use super::plugin::WindowedPlugin;
 
 /// Ratatui context that draws into a cell grid which [`WindowedPlugin`] renders to a texture and
 /// displays in a window, instead of drawing to a terminal buffer.
-#[derive(Debug, Deref, DerefMut)]
+#[derive(Deref, DerefMut)]
 pub struct WindowedContext(Terminal<RatatuiBackend>);
+
+/// Names the context without printing the screen it holds.
+impl std::fmt::Debug for WindowedContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WindowedContext").finish_non_exhaustive()
+    }
+}
 
 impl TerminalContext<RatatuiBackend> for WindowedContext {
     fn init() -> Result<Self> {

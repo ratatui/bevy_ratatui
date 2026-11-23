@@ -12,9 +12,11 @@ use crate::RatatuiContext;
 ///
 /// By default, the terminal uses Bevy's built-in monospace font (`Handle::<Font>::default()`,
 /// covering ASCII, with `bevy_terminal` rendering box-drawing, block, shade, and braille symbols
-/// procedurally and requiring no system font discovery). Applications can supply embedded or
-/// dynamically loaded font assets on `TerminalRenderConfig` in `PostStartup` or swap them in any
-/// `Update` system while running.
+/// procedurally and requiring no system font discovery). That font has one face, and Bevy does
+/// not synthesize weight or slant, so bold and italic text look like regular text until the
+/// configuration names bold and italic faces (see the `windowed_fonts` example). Applications can
+/// supply embedded or dynamically loaded font assets on `TerminalRenderConfig` in `PostStartup` or
+/// swap them in any `Update` system while running.
 pub struct WindowedPlugin;
 
 impl Plugin for WindowedPlugin {
@@ -105,13 +107,22 @@ fn follow_window_scale(
 }
 
 /// Resizes the grid to fill the window, at the cell size measured for the last frame.
+///
+/// Only the backend's grid is resized, which keeps what is drawn in the cells both sizes share:
+/// Ratatui adopts the new size, and clears, on its next draw. An application that draws only
+/// when its state changes keeps its last frame until then.
 fn fit_to_window(
     window: Single<&Window, With<PrimaryWindow>>,
     ui_scale: Option<Res<UiScale>>,
     texture: Single<&TerminalTexture, With<RatatuiContext>>,
     device: Option<Res<RenderDevice>>,
     mut context: ResMut<RatatuiContext>,
-) -> Result {
+) {
+    let window_size = window.resolution.physical_size().as_vec2();
+    // A minimized window has no size; keep the grid, and what is drawn in it, until it returns.
+    if window_size.min_element() <= 0.0 {
+        return;
+    }
     let current = context.backend().grid().size();
     let Some(geometry) = texture.measured() else {
         // Recover from an oversized grid (whether on frame 1 or after a font-size jump) by
@@ -122,35 +133,25 @@ fn fit_to_window(
         ) && current != GridSize::new(1, 1)
         {
             context.backend_mut().resize(1, 1);
-            context.autoresize()?;
         }
-        return Ok(());
+        return;
     };
     // Geometry for another grid size was measured before the last resize.
     if geometry.grid() != current {
-        return Ok(());
+        return;
     }
-    // The space the window offers, in the UI pixels the terminal's node is sized in.
-    let available =
-        window.resolution.physical_size().as_vec2() / ui_scale_factor(&window, ui_scale.as_deref());
-    // A minimized window has no size; keep the grid, and what is drawn in it, until it returns.
-    if available.min_element() <= 0.0 {
-        return Ok(());
-    }
-    let grid = grid_for(available, geometry.cell_size());
+    // The window in the pixels the terminal is rasterized in: its own physical pixels, unless
+    // `bevy_terminal` clamped the scale. Whole pixels divide into whole cells exactly, which
+    // sizes in UI pixels do not at fractional scales.
+    let raster_per_window = geometry.raster_scale() / ui_scale_factor(&window, ui_scale.as_deref());
     // A window larger than a texture can be is filled as far as one reaches, rather than asking
     // for a grid that cannot be drawn. `bevy_terminal` assumes the same limit without a device.
     let limit = device.map_or(8192, |device| device.limits().max_texture_dimension_2d);
-    let drawable = grid_for(Vec2::splat(limit as f32), geometry.physical_cell_size());
-    let grid = GridSize::new(
-        grid.width.min(drawable.width),
-        grid.height.min(drawable.height),
-    );
+    let available = (window_size * raster_per_window).min(Vec2::splat(limit as f32));
+    let grid = grid_for(available, geometry.physical_cell_size());
     if grid != current {
         context.backend_mut().resize(grid.width, grid.height);
-        context.autoresize()?;
     }
-    Ok(())
 }
 
 /// Shows the rendered texture at its measured size.
@@ -312,6 +313,53 @@ mod tests {
         for _ in 0..4 {
             assert_eq!(status(&mut app), settled, "the grid keeps changing");
         }
+    }
+
+    #[test]
+    fn a_frame_drawn_once_survives_fitting_the_window() {
+        let mut app = headless_windowed_app();
+        app.add_systems(
+            Update,
+            |mut context: ResMut<RatatuiContext>, mut drawn: Local<bool>| -> Result {
+                if !std::mem::replace(&mut *drawn, true) {
+                    context.draw(|frame| frame.render_widget("once", frame.area()))?;
+                }
+                Ok(())
+            },
+        );
+        for _ in 0..6 {
+            app.update();
+        }
+        let context = app.world().resource::<RatatuiContext>();
+        let grid = context.backend().grid();
+        assert_ne!(grid.size(), GridSize::new(80, 24), "the grid was fitted");
+        assert_eq!(grid.row_text(0).trim_end(), "once");
+    }
+
+    #[test]
+    fn a_fractional_scale_fills_every_column_that_fits() {
+        let mut app = headless_windowed_app();
+        let mut window = app
+            .world_mut()
+            .query_filtered::<&mut Window, With<PrimaryWindow>>()
+            .single_mut(app.world_mut())
+            .expect("primary window");
+        window.resolution.set_scale_factor_override(Some(1.25));
+        window.resolution.set_physical_resolution(1400, 400);
+        for _ in 0..6 {
+            app.update();
+        }
+        let geometry = *app
+            .world_mut()
+            .query_filtered::<&TerminalTexture, With<RatatuiContext>>()
+            .single(app.world())
+            .expect("terminal texture attached")
+            .measured()
+            .expect("ready");
+        assert_eq!(geometry.raster_scale(), 1.25);
+        let cell = geometry.physical_cell_size().x as u32;
+        assert_eq!(1400 % cell, 0, "the window is a whole number of cells wide");
+        assert_eq!(u32::from(geometry.grid().width), 1400 / cell);
     }
 
     #[test]

@@ -81,7 +81,9 @@ example, see the [snake example](examples/snake/README.md).
   `bevy/system_font_discovery` for OS font discovery. Rendered on the GPU via
   [bevy_terminal](https://github.com/gold-silver-copper/bevy_terminal); enables
   only the Bevy features the windowed backend needs — windowing, rendering, text
-  (`default_font`), and `bevy_ui` (Cargo features are additive).
+  (`default_font`), and `bevy_ui` (Cargo features are additive). The default
+  font has a single face, so bold and italic text render as regular until you
+  set bold and italic faces on `TerminalRenderConfig`.
 - `scrolling-regions`: Enable Ratatui's scrolling regions for every backend.
   Use this rather than `ratatui/scrolling-regions`, which leaves the windowed
   backend without the methods Ratatui then requires.
