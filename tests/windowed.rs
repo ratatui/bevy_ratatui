@@ -419,3 +419,68 @@ fn a_removed_context_is_no_longer_shown_and_a_new_one_is() {
     assert!(matches!(status(&mut app), TerminalStatus::Failed(_)));
     assert_eq!(view(&mut app).1, ImageNode::default().image);
 }
+
+/// Puts the mouse at a physical pixel of the window (or outside it) and returns the cell there.
+fn cell_at(app: &mut App, pixel: Option<(f64, f64)>) -> Option<(u16, u16)> {
+    window(app, |window| {
+        window.set_physical_cursor_position(pixel.map(Into::into));
+    });
+    frames(app, 1);
+    let cell = app.world().resource::<WindowedCursor>().0;
+    cell.map(|cell| (cell.x, cell.y))
+}
+
+#[test]
+fn the_cursor_is_mapped_to_the_cell_under_it() {
+    let mut app = app();
+    // 645×410 leaves a gutter around the centered terminal, of half a cell at most.
+    window(&mut app, |window| {
+        window.resolution.set_physical_resolution(645, 410);
+    });
+    frames(&mut app, 4);
+    let geometry = ready(&mut app);
+    let (cell, grid) = (geometry.physical_cell_size(), geometry.grid());
+    let origin = (Vec2::new(645.0, 410.0) - geometry.size().as_vec2()) / 2.0;
+    assert!(
+        origin.min_element() >= 1.0,
+        "a gutter on every side: {origin}"
+    );
+    // A pixel inside the cell at `column`, `row`.
+    let inside = |column: u16, row: u16| {
+        let pixel = origin + (Vec2::new(column.into(), row.into()) + 0.5) * cell;
+        Some((f64::from(pixel.x), f64::from(pixel.y)))
+    };
+
+    assert_eq!(cell_at(&mut app, None), None, "outside the window");
+    assert_eq!(cell_at(&mut app, Some((0.0, 0.0))), None, "in the gutter");
+    assert_eq!(
+        cell_at(&mut app, Some((644.0, 409.0))),
+        None,
+        "in the gutter"
+    );
+    assert_eq!(cell_at(&mut app, Some((644.0, 205.0))), None, "right of it");
+    assert_eq!(cell_at(&mut app, Some((322.0, 409.0))), None, "below it");
+    let last = (grid.width - 1, grid.height - 1);
+    for at in [(0, 0), (3, 2), last] {
+        assert_eq!(cell_at(&mut app, inside(at.0, at.1)), Some(at));
+    }
+
+    // At another scale the same cell is elsewhere, and still found.
+    window(&mut app, |window| {
+        window.resolution.set_scale_factor_override(Some(1.5));
+    });
+    frames(&mut app, 4);
+    let scaled = ready(&mut app);
+    assert_ne!(scaled.physical_cell_size(), cell);
+    let origin = (Vec2::new(645.0, 410.0) - scaled.size().as_vec2()) / 2.0;
+    let pixel = origin + Vec2::new(3.5, 2.5) * scaled.physical_cell_size();
+    let pixel = Some((f64::from(pixel.x), f64::from(pixel.y)));
+    assert_eq!(cell_at(&mut app, pixel), Some((3, 2)));
+
+    // A terminal that cannot be drawn has no cells to point at.
+    configure(&mut app, |config| {
+        config.sizing = TerminalSizing::font(f32::NAN)
+    });
+    frames(&mut app, 2);
+    assert_eq!(cell_at(&mut app, pixel), None);
+}

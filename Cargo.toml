@@ -51,6 +51,11 @@ path = "examples/windowed_fonts.rs"
 required-features = ["windowed"]
 
 [[example]]
+name = "windowed_mouse"
+path = "examples/windowed_mouse.rs"
+required-features = ["windowed"]
+
+[[example]]
 name = "windowed_system_fonts"
 path = "examples/windowed_system_fonts.rs"
 required-features = ["windowed", "bevy/system_font_discovery"]

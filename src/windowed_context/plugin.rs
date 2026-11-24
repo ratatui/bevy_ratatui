@@ -5,6 +5,7 @@ use bevy::{
     window::{PrimaryWindow, WindowRef},
 };
 use bevy_terminal_ratatui::prelude::*;
+use ratatui::layout::Position;
 
 use crate::RatatuiContext;
 
@@ -26,15 +27,29 @@ use crate::RatatuiContext;
 ///
 /// Add the plugin before the [`RatatuiContext`] resource is inserted, as
 /// [`RatatuiPlugins`](crate::RatatuiPlugins) does: a context that exists first is never drawn.
+///
+/// For mouse input, [`WindowedCursor`] is the cell under the cursor.
 pub struct WindowedPlugin;
+
+/// The terminal cell under the mouse cursor, updated in `PreUpdate`: `None` while the cursor is
+/// outside the primary window or the terminal shown in it, or the terminal is not drawn.
+///
+/// Windowed mode has no mouse messages of its own. Read this with Bevy's
+/// `ButtonInput<MouseButton>` and `MouseWheel` to know which cell a click or a scroll is over.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowedCursor(pub Option<Position>);
 
 impl Plugin for WindowedPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(RatatuiSourcePlugin::<RatatuiContext>::default())
+            .init_resource::<WindowedCursor>()
             // After every startup schedule, so a camera spawned in any of them is seen.
             .add_systems(PreUpdate, setup.run_if(run_once))
             // Before any `Update` system draws, so a resize never clears a frame already drawn.
-            .add_systems(PreUpdate, (follow_window_scale, fit_to_window))
+            .add_systems(
+                PreUpdate,
+                (follow_window_scale, fit_to_window, track_cursor),
+            )
             .add_systems(
                 PostUpdate,
                 // Before Bevy UI measures and lays out the node.
@@ -157,6 +172,36 @@ fn fit_to_window(
     // Compared first, so that an unchanged context is not marked changed.
     if grid != context.backend().grid().size() {
         context.backend_mut().resize(grid.width, grid.height);
+    }
+}
+
+/// Finds the cell under the cursor in the terminal as it was last shown: centered in the window,
+/// one texture pixel to `shown` physical pixels.
+fn track_cursor(
+    window: Single<&Window, With<PrimaryWindow>>,
+    ui_scale: Option<Res<UiScale>>,
+    texture: Option<Single<&TerminalTexture, With<RatatuiContext>>>,
+    mut cursor: ResMut<WindowedCursor>,
+) {
+    let cell = || {
+        let geometry = texture.as_ref()?.measured()?;
+        let position = window.physical_cursor_position()?;
+        // One, unless `bevy_terminal` clamped the scale it rasterizes at.
+        let shown = ui_scale_factor(&window, ui_scale.as_deref()) / geometry.raster_scale();
+        let terminal = geometry.size().as_vec2() * shown;
+        let origin = (window.resolution.physical_size().as_vec2() - terminal) / 2.0;
+        let cell = (position - origin) / (geometry.physical_cell_size() * shown);
+        let grid = geometry.grid();
+        // Converted only once known to be inside the grid, where the casts are exact.
+        let inside = cell.cmpge(Vec2::ZERO).all()
+            && cell.x < f32::from(grid.width)
+            && cell.y < f32::from(grid.height);
+        inside.then(|| Position::new(cell.x as u16, cell.y as u16))
+    };
+    let cell = WindowedCursor(cell());
+    // Compared first, so that systems run on its change only when the cell does.
+    if *cursor != cell {
+        *cursor = cell;
     }
 }
 

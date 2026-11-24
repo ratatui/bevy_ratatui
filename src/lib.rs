@@ -131,7 +131,7 @@ pub mod translation {
 /// ```
 #[cfg(feature = "windowed")]
 pub mod windowed {
-    pub use super::windowed_context::plugin::WindowedPlugin;
+    pub use super::windowed_context::plugin::{WindowedCursor, WindowedPlugin};
     /// The backend the windowed context draws into.
     pub use bevy_terminal_ratatui::RatatuiBackend;
     /// Renderer configuration and inspection types for the windowed terminal.
