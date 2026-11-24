@@ -91,20 +91,62 @@ fn cameras(app: &mut App) -> Vec<RenderTarget> {
     cameras.iter(app.world()).cloned().collect()
 }
 
-#[test]
-fn the_default_font_draws_without_system_fonts() {
-    let mut app = app();
-    frames(&mut app, 2);
-    ready(&mut app);
+/// The UI node the plugin shows the terminal in: the only image node in the app.
+fn view(app: &mut App) -> (Node, Handle<Image>, Option<Entity>) {
+    let (node, image, camera) = app
+        .world_mut()
+        .query::<(&Node, &ImageNode, Option<&UiTargetCamera>)>()
+        .single(app.world())
+        .expect("one view");
+    (
+        node.clone(),
+        image.image.clone(),
+        camera.map(|camera| camera.0),
+    )
+}
+
+fn image(app: &mut App) -> Handle<Image> {
+    app.world_mut()
+        .query_filtered::<&TerminalTexture, With<RatatuiContext>>()
+        .single(app.world())
+        .expect("the context has a texture")
+        .image()
+        .clone()
 }
 
 #[test]
-fn a_font_set_at_startup_is_kept_and_can_be_swapped_while_running() {
+fn the_default_font_draws_text_in_a_grid_fitted_to_the_window() {
+    let mut app = app();
+    frames(&mut app, 3);
+    assert_eq!(draw(&mut app, "hello").trim_end(), "hello");
+    frames(&mut app, 1);
+    let geometry = ready(&mut app);
+    // Not the 80×24 the context starts at: 640×400 pixels of the cell that was measured.
+    let cell = geometry.physical_cell_size();
+    let fitted = GridSize::new((640.0 / cell.x) as u16, (400.0 / cell.y) as u16);
+    assert_eq!(geometry.grid(), fitted);
+    assert_ne!(fitted, GridSize::new(80, 24));
+}
+
+#[test]
+fn the_texture_is_shown_at_its_size_in_ui_pixels() {
+    let mut app = app();
+    app.insert_resource(UiScale(2.0));
+    frames(&mut app, 3);
+    let geometry = ready(&mut app);
+    assert_eq!(geometry.raster_scale(), 2.0, "rasterized at the UI's scale");
+    let (node, shown, _) = view(&mut app);
+    // Half the texture's pixels, which the UI doubles again.
+    let size = geometry.size().as_vec2() / 2.0;
+    assert_eq!((node.width, node.height), (px(size.x), px(size.y)));
+    assert_eq!(shown, image(&mut app));
+}
+
+#[test]
+fn configuration_set_at_startup_is_kept_and_a_change_while_running_is_drawn() {
     let mut app = app();
     let mut fonts = app.world_mut().resource_mut::<Assets<Font>>();
-    let [initial, replacement] =
-        [(); 2].map(|()| fonts.add(Font::from_bytes(DEFAULT_FONT_DATA.to_vec())));
-    let at_startup = FontFaces::regular(initial);
+    let at_startup = FontFaces::regular(fonts.add(Font::from_bytes(DEFAULT_FONT_DATA.to_vec())));
     let font = at_startup.clone();
     app.add_systems(
         PostStartup,
@@ -112,15 +154,49 @@ fn a_font_set_at_startup_is_kept_and_can_be_swapped_while_running() {
             config.font = font.clone();
         },
     );
-    frames(&mut app, 2);
+    frames(&mut app, 3);
     configure(&mut app, |config| assert_eq!(config.font, at_startup));
+    let before = ready(&mut app);
 
     configure(&mut app, |config| {
-        config.font = FontFaces::regular(replacement);
-        config.sizing = TerminalSizing::font(24.0);
+        config.sizing = TerminalSizing::font(before.font_size() * 2.0)
     });
-    frames(&mut app, 2);
-    ready(&mut app);
+    frames(&mut app, 3);
+    let after = ready(&mut app);
+    assert_eq!(after.font_size(), before.font_size() * 2.0);
+    assert!(
+        after.grid().width < before.grid().width,
+        "larger cells, fewer columns"
+    );
+}
+
+#[test]
+fn a_change_of_scale_factor_keeps_the_window_filled() {
+    let mut app = app();
+    frames(&mut app, 3);
+    let before = ready(&mut app);
+    window(&mut app, |window| {
+        window.resolution.set_scale_factor_override(Some(2.0));
+    });
+    frames(&mut app, 4);
+    let after = ready(&mut app);
+    assert_eq!(after.raster_scale(), 2.0);
+    // The same physical pixels hold half as many cells of twice the size.
+    let columns = (640.0 / after.physical_cell_size().x) as u16;
+    assert_eq!(after.grid().width, columns);
+    assert!(after.grid().width < before.grid().width);
+}
+
+#[test]
+fn a_minimized_window_keeps_its_grid() {
+    let mut app = app();
+    frames(&mut app, 3);
+    let before = ready(&mut app).grid();
+    window(&mut app, |window| {
+        window.resolution.set_physical_resolution(0, 0);
+    });
+    frames(&mut app, 3);
+    assert_eq!(ready(&mut app).grid(), before);
 }
 
 #[test]
@@ -159,6 +235,7 @@ fn a_window_larger_than_a_texture_settles_on_the_largest_grid_that_can_be_drawn(
     });
     frames(&mut app, 6);
     let settled = ready(&mut app);
+    // 8192 is the limit `bevy_terminal` takes a texture to have when, as here, there is no GPU.
     let width = settled.size().x as f32;
     assert!(width <= 8192.0 && width + settled.physical_cell_size().x > 8192.0);
     for _ in 0..4 {
@@ -250,9 +327,40 @@ fn a_camera_is_spawned_only_when_the_primary_window_has_none() {
 }
 
 #[test]
-fn removing_the_context_stops_the_terminal_without_a_panic() {
+fn an_inactive_camera_does_not_stand_in_for_one_that_draws() {
     let mut app = app();
-    frames(&mut app, 1);
+    let inactive = app
+        .world_mut()
+        .spawn((
+            Camera2d,
+            Camera {
+                is_active: false,
+                ..default()
+            },
+        ))
+        .id();
+    frames(&mut app, 2);
+    assert_eq!(cameras(&mut app).len(), 2);
+    // The terminal is shown by the camera spawned for it, whichever Bevy UI would pick.
+    let (.., camera) = view(&mut app);
+    assert!(camera.is_some_and(|camera| camera != inactive));
+}
+
+#[test]
+fn a_removed_context_is_no_longer_shown_and_a_new_one_is() {
+    let mut app = app();
+    frames(&mut app, 3);
+    let first = image(&mut app);
+    assert_eq!(view(&mut app).1, first);
+
     app.world_mut().remove_resource::<RatatuiContext>();
     frames(&mut app, 2);
+    let (node, shown, _) = view(&mut app);
+    assert_eq!((node.width, shown), (Val::Auto, ImageNode::default().image));
+
+    let context = RatatuiContext::init().expect("a context");
+    app.world_mut().insert_resource(context);
+    frames(&mut app, 3);
+    ready(&mut app);
+    assert_eq!(view(&mut app).1, image(&mut app));
 }

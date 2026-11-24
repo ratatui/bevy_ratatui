@@ -9,6 +9,12 @@ documentation = "https://docs.rs/bevy_ratatui"
 authors = ["cxreiff <cooper@cxreiff.com>", "Joshka"]
 categories = ["command-line-interface"]
 keywords = ["cli", "ratatui", "terminal", "tui", "bevy"]
+# The example fonts keep their own licenses (see `assets/fonts/`) and are not
+# published; `windowed_fonts`, which embeds some, builds from the repository only.
+exclude = ["assets/"]
+
+[package.metadata.docs.rs]
+features = ["windowed", "scrolling-regions"]
 
 [dependencies]
 bevy = { version = "0.20.0", default-features = false }
@@ -47,7 +53,7 @@ required-features = ["windowed"]
 [[example]]
 name = "windowed_system_fonts"
 path = "examples/windowed_system_fonts.rs"
-required-features = ["windowed"]
+required-features = ["windowed", "bevy/system_font_discovery"]
 
 # Enable a small amount of optimization in debug mode
 [profile.dev]
@@ -74,6 +80,8 @@ crossterm = ["ratatui/crossterm"]
 # It needs a render stack and a window, but none of Bevy's audio, 3D, animation,
 # gizmo, picking, scene or gamepad features. Downstream crates that want those
 # can enable them on their own `bevy` dependency; Cargo features are additive.
+# The platform lines are defaults an application would otherwise have to pick:
+# both Linux window protocols, WebGL2 on the web, and multithreading.
 windowed = [
   "dep:bevy_terminal_ratatui",
   # platform

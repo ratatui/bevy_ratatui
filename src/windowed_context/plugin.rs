@@ -18,6 +18,13 @@ use crate::RatatuiContext;
 /// configuration names bold and italic faces (see the `windowed_fonts` example). Applications can
 /// supply embedded or dynamically loaded font assets on `TerminalRenderConfig` in `PostStartup` or
 /// swap them in any `Update` system while running.
+///
+/// The plugin owns two things an application would otherwise set: the grid's size, which follows
+/// the window, and `TerminalRenderConfig::raster.scale`, which follows the window's scale factor
+/// and [`UiScale`] and is overwritten every frame.
+///
+/// Add the plugin before the [`RatatuiContext`] resource is inserted, as
+/// [`RatatuiPlugins`](crate::RatatuiPlugins) does: a context that exists first is never drawn.
 pub struct WindowedPlugin;
 
 impl Plugin for WindowedPlugin {
@@ -53,14 +60,12 @@ impl RatatuiSource for RatatuiContext {
 #[derive(Component)]
 struct TerminalView;
 
-/// Spawns the UI node showing the terminal, and a 2D camera unless the application spawned one
-/// that Bevy UI draws to by default: one on the primary window, or marked `IsDefaultUiCamera`.
-/// A camera on another window or an image would show nothing.
-fn setup(mut commands: Commands, ui_camera: DefaultUiCamera) {
-    if ui_camera.get().is_none() {
-        commands.spawn(Camera2d);
-    }
-    commands.spawn((
+/// Spawns the UI node showing the terminal, and a 2D camera unless the application spawned an
+/// active one that Bevy UI draws to by default: one on the primary window, or marked
+/// `IsDefaultUiCamera`. A camera on another window or an image, or an inactive one, would show
+/// nothing; the node is then shown by the camera spawned here, whichever Bevy UI would pick.
+fn setup(mut commands: Commands, ui_camera: DefaultUiCamera, cameras: Query<&Camera>) {
+    let mut view = commands.spawn((
         TerminalView,
         ImageNode::default(),
         Node {
@@ -69,6 +74,11 @@ fn setup(mut commands: Commands, ui_camera: DefaultUiCamera) {
             ..default()
         },
     ));
+    let usable = ui_camera.get().and_then(|camera| cameras.get(camera).ok());
+    if !usable.is_some_and(|camera| camera.is_active) {
+        let camera = view.commands().spawn(Camera2d).id();
+        view.insert(UiTargetCamera(camera));
+    }
 }
 
 /// The scale Bevy UI applies to this window: one logical UI pixel is this many physical pixels.
@@ -127,23 +137,32 @@ fn fit_to_window(
     }
 }
 
-/// Shows the rendered texture at its measured size.
+/// Shows the rendered texture at its measured size, and nothing once the context is removed
+/// (which also lets go of its image).
 fn present(
-    texture: Single<&TerminalTexture, (With<RatatuiContext>, Changed<TerminalTexture>)>,
+    texture: Option<Single<&TerminalTexture, With<RatatuiContext>>>,
     view: Single<(&mut Node, &mut ImageNode), With<TerminalView>>,
 ) {
-    let Some(geometry) = texture.measured() else {
-        return;
+    let (width, height, shown) = match &texture {
+        Some(texture) => match texture.measured() {
+            Some(geometry) => {
+                let size = geometry.logical_size();
+                (px(size.x), px(size.y), texture.image().clone())
+            }
+            // Not drawn yet, or failed: keep what is shown.
+            None => return,
+        },
+        None => (Val::Auto, Val::Auto, ImageNode::default().image),
     };
     let (mut node, mut image) = view.into_inner();
-    let size = geometry.logical_size();
-    if node.width != px(size.x) {
-        node.width = px(size.x);
+    // Compared first, so that an unchanged node is not laid out again.
+    if node.width != width {
+        node.width = width;
     }
-    if node.height != px(size.y) {
-        node.height = px(size.y);
+    if node.height != height {
+        node.height = height;
     }
-    if image.image != *texture.image() {
-        image.image = texture.image().clone();
+    if image.image != shown {
+        image.image = shown;
     }
 }

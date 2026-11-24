@@ -1,6 +1,6 @@
 //! Opt-in OS system font discovery showcase for the windowed backend.
 //!
-//! Unlike `windowed_fonts` (which bundles font files and has zero system-font dependency),
+//! Unlike `windowed_fonts` (which bundles font files and needs no system fonts),
 //! this example enables `bevy/system_font_discovery` directly via Cargo's additive features so
 //! the OS font catalog resolves generic monospace families, named installed monospace families,
 //! and automatic cross-script fallbacks (CJK, Emoji, RTL, Indic, Thai) with no bundled font
@@ -20,8 +20,6 @@
 //! - `C`: cycle cursor style (`Block`, `Bar`, `Underline`)
 //! - `Q` / `Esc`: quit
 
-use std::time::Duration;
-
 use bevy::{
     app::AppExit,
     input::{
@@ -29,20 +27,18 @@ use bevy::{
         keyboard::{Key, KeyboardInput},
     },
     prelude::*,
-    winit::{UpdateMode, WinitSettings},
 };
 use bevy_ratatui::{
     RatatuiContext, RatatuiPlugins,
     windowed::{
-        CursorStyle, FontFaces, FontSource, TerminalFailure, TerminalRenderConfig, TerminalSizing,
-        TerminalStatus, TerminalTexture,
+        CursorStyle, FontFaces, FontSource, TerminalRenderConfig, TerminalSizing, TerminalTexture,
     },
 };
 use ratatui::{
     layout::{Constraint, Layout, Position},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph, Wrap},
+    widgets::{Block, Paragraph},
 };
 
 const MIN_FONT_SIZE: f32 = 10.0;
@@ -134,7 +130,7 @@ impl Default for DemoState {
     }
 }
 
-fn main() {
+fn main() -> AppExit {
     App::new()
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
@@ -147,14 +143,10 @@ fn main() {
             }),
             RatatuiPlugins::default(),
         ))
-        .insert_resource(WinitSettings {
-            focused_mode: UpdateMode::reactive(Duration::from_millis(125)),
-            unfocused_mode: UpdateMode::reactive_low_power(Duration::from_secs(60)),
-        })
         .init_resource::<DemoState>()
         .add_systems(PostStartup, configure_initial_font)
         .add_systems(Update, (handle_input, draw_demo).chain())
-        .run();
+        .run()
 }
 
 fn configure_initial_font(
@@ -225,21 +217,7 @@ fn draw_demo(
     state: Res<DemoState>,
     texture: Single<&TerminalTexture, With<RatatuiContext>>,
     mut context: ResMut<RatatuiContext>,
-    mut warned_missing_discovery: Local<bool>,
 ) -> Result {
-    if !*warned_missing_discovery
-        && matches!(
-            texture.status(),
-            TerminalStatus::Failed(TerminalFailure::ShapingFailed)
-        )
-    {
-        *warned_missing_discovery = true;
-        warn!(
-            "No system fonts found; run with `--features windowed,bevy/system_font_discovery` \
-             (or enable `bevy/system_font_discovery` in your Cargo.toml)."
-        );
-    }
-
     let metrics = match texture.measured() {
         Some(geometry) => format!(
             "{}×{} cells · cell {:.1}×{:.1} px · scale {:.2}×",
@@ -332,14 +310,10 @@ fn draw_demo(
             .title(" Live System Font Preview ")
             .border_style(Style::new().fg(Color::DarkGray));
         let body_inner = body_block.inner(body);
-        frame.render_widget(
-            Paragraph::new(lines)
-                .block(body_block)
-                .wrap(Wrap { trim: false }),
-            body,
-        );
+        // Not wrapped, so that the cursor's row is the line's index.
+        frame.render_widget(Paragraph::new(lines).block(body_block), body);
 
-        if cursor_row < body_inner.height {
+        if cursor_row < body_inner.height && body_inner.width > 14 {
             frame.set_cursor_position(Position::new(
                 body_inner.x.saturating_add(14),
                 body_inner.y.saturating_add(cursor_row),
