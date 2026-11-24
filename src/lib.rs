@@ -134,6 +134,8 @@ pub mod windowed {
     pub use super::windowed_context::plugin::WindowedPlugin;
     /// The backend the windowed context draws into.
     pub use bevy_terminal_ratatui::RatatuiBackend;
+    /// When the grid is fitted to the window and the texture shown, for ordering systems.
+    pub use bevy_terminal_ratatui::RatatuiWindowSystems;
     /// Renderer configuration and inspection types for the windowed terminal.
     pub use bevy_terminal_ratatui::prelude::{
         BlinkConfig, CellGeometry, CursorConfig, CursorStyle, FontFaces, FontHinting, FontSource,

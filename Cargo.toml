@@ -20,7 +20,9 @@ features = ["windowed", "scrolling-regions"]
 bevy = { version = "0.20.0", default-features = false }
 bitflags = "2.8"
 ratatui = { version = "0.30", default-features = false }
-bevy_terminal_ratatui = { version = "0.11.0", default-features = false, optional = true }
+bevy_terminal_ratatui = { version = "0.11.1", default-features = false, optional = true, features = [
+  "window",
+] }
 tracing = "0.1"
 
 [dev-dependencies]
@@ -80,29 +82,17 @@ crossterm = ["ratatui/crossterm"]
 # It needs a render stack and a window, but none of Bevy's audio, 3D, animation,
 # gizmo, picking, scene or gamepad features. Downstream crates that want those
 # can enable them on their own `bevy` dependency; Cargo features are additive.
-# The platform lines are defaults an application would otherwise have to pick:
-# both Linux window protocols, WebGL2 on the web, and multithreading.
+# `bevy_terminal_ratatui` enables the Bevy features it renders and shows the
+# terminal with (render, text with `default_font`, UI, window). The lines here
+# are the defaults an application would otherwise have to pick: a window
+# backend, both Linux window protocols, WebGL2 on the web, and multithreading.
 windowed = [
   "dep:bevy_terminal_ratatui",
-  # platform
-  "bevy/std",
-  "bevy/multi_threaded",
+  "bevy/bevy_winit",
   "bevy/x11",
   "bevy/wayland",
   "bevy/webgl2",
-  # windowing
-  "bevy/bevy_window",
-  "bevy/bevy_winit",
-  # rendering the terminal texture
-  "bevy/bevy_render",
-  "bevy/bevy_core_pipeline",
-  "bevy/bevy_asset",
-  "bevy/bevy_image",
-  "bevy/bevy_text",
-  "bevy/default_font",
-  # `ImageNode` / `Node` used to present the texture
-  "bevy/bevy_ui",
-  "bevy/bevy_ui_render",
+  "bevy/multi_threaded",
 ]
 keyboard = ["bevy/keyboard"]
 mouse = ["bevy/mouse"]

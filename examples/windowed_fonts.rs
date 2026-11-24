@@ -9,9 +9,9 @@
 //! - **DejaVu Sans Mono** (regular only): one face for every style, with the fallbacks
 //! - **Bevy's default font** (an ASCII subset of Fira Mono): what a terminal uses unconfigured
 //!
-//! A preset without a fallback list still shows some scripts its font lacks: Bevy looks for them
-//! in every font loaded, here the other presets' fallbacks. Only a list says which fonts, in
-//! which order.
+//! A preset without a fallback list may still show scripts its font lacks: Bevy can find them
+//! in other fonts already loaded, here the other presets' fallbacks. Only a list says which
+//! fonts are tried, and in which order.
 //!
 //! The renderer's own test scene (every modifier combination, the color cube, box drawing) is
 //! `bevy_terminal`'s `render_test` example. For OS font discovery (`FontSource::monospace()`,
