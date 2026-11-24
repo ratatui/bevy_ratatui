@@ -1,109 +1,193 @@
 use bevy::{
-    asset::RenderAssetUsages,
+    camera::RenderTarget,
     prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
-    window::WindowResized,
+    ui::{DefaultUiCamera, UiSystems},
+    window::{PrimaryWindow, WindowRef},
 };
+use bevy_terminal_ratatui::prelude::*;
 
 use crate::RatatuiContext;
 
-/// A plugin that, rather than drawing to a terminal buffer, uses software rendering to build a 2D
-/// texture from the ratatui buffer, and displays the result in a window.
+/// A plugin that, rather than drawing to a terminal buffer, renders the ratatui buffer to a 2D
+/// texture with `bevy_terminal`, and displays the result in a window. The grid is resized to fill
+/// the primary window and rasterized at its scale factor.
+///
+/// By default, the terminal uses Bevy's built-in monospace font (`Handle::<Font>::default()`,
+/// covering ASCII, with `bevy_terminal` rendering box-drawing, block, shade, and braille symbols
+/// procedurally and requiring no system font discovery). That font has one face, and Bevy does
+/// not synthesize weight or slant, so bold and italic text look like regular text until the
+/// configuration names bold and italic faces (see the `windowed_fonts` example). Applications can
+/// supply embedded or dynamically loaded font assets on `TerminalRenderConfig` in `PostStartup` or
+/// swap them in any `Update` system while running.
+///
+/// The plugin owns two things an application would otherwise set: the grid's size, which follows
+/// the window, and `TerminalRenderConfig::raster.scale`, which follows the window's scale factor
+/// and [`UiScale`] and is overwritten every frame.
+///
+/// Add the plugin before the [`RatatuiContext`] resource is inserted, as
+/// [`RatatuiPlugins`](crate::RatatuiPlugins) does: a context that exists first is never drawn.
 pub struct WindowedPlugin;
 
 impl Plugin for WindowedPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostStartup, terminal_render_setup)
-            .add_systems(PreUpdate, handle_resize_messages)
-            .add_systems(Update, render_terminal_to_handle);
+        app.add_plugins(RatatuiSourcePlugin::<RatatuiContext>::default())
+            // After every startup schedule, so a camera spawned in any of them is seen.
+            .add_systems(PreUpdate, setup.run_if(run_once))
+            // Before any `Update` system draws, so a resize never clears a frame already drawn.
+            .add_systems(PreUpdate, (follow_window_scale, fit_to_window))
+            .add_systems(
+                PostUpdate,
+                // Before Bevy UI measures and lays out the node.
+                present
+                    .after(TerminalSystems::Sync)
+                    .before(UiSystems::Content),
+            );
     }
 }
 
-#[derive(Resource)]
-struct TerminalRender(Handle<Image>);
+/// The grid `bevy_terminal` renders is the one the context's backend draws into.
+impl TerminalSource for RatatuiContext {
+    fn grid(&self) -> &TerminalGrid {
+        self.backend().grid()
+    }
+}
 
-/// A startup system that sets up the terminal
-pub fn terminal_render_setup(
+impl RatatuiSource for RatatuiContext {
+    fn backend_mut(&mut self) -> &mut RatatuiBackend {
+        self.0.backend_mut()
+    }
+}
+
+/// The UI node that displays the terminal texture.
+#[derive(Component)]
+struct TerminalView;
+
+/// Spawns the UI node showing the terminal, and a 2D camera unless the primary window has an
+/// active one.
+///
+/// Bevy UI draws a node to its default camera: the one marked `IsDefaultUiCamera`, or the
+/// highest-order one on the primary window. Where that is an active camera on the primary window
+/// the node is left to it. Where it is not (it is inactive, or marked on another window or an
+/// image) the node is bound to another active camera on the primary window, or to the one
+/// spawned here.
+fn setup(
     mut commands: Commands,
-    softatui: ResMut<RatatuiContext>,
-    mut images: ResMut<Assets<Image>>,
-) -> Result {
-    commands.spawn(Camera2d);
-    // Create an image that we are going to draw into
-    let width = softatui.backend().get_pixmap_width() as u32;
-    let height = softatui.backend().get_pixmap_height() as u32;
-    let data = softatui.backend().get_pixmap_data_as_rgba();
-
-    let image = Image::new(
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
-    );
-    let handle = images.add(image);
-    commands.spawn((
-        ImageNode::new(handle.clone()),
+    ui_camera: DefaultUiCamera,
+    cameras: Query<(Entity, &Camera, &RenderTarget)>,
+    primary_window: Query<(), With<PrimaryWindow>>,
+) {
+    let mut view = commands.spawn((
+        TerminalView,
+        ImageNode::default(),
         Node {
             justify_self: JustifySelf::Center,
             align_self: AlignSelf::Center,
             ..default()
         },
     ));
-
-    commands.insert_resource(TerminalRender(handle));
-
-    Ok(())
+    let usable = cameras.iter().filter(|(_, camera, target)| {
+        camera.is_active
+            && match target {
+                RenderTarget::Window(WindowRef::Primary) => true,
+                RenderTarget::Window(WindowRef::Entity(window)) => primary_window.contains(*window),
+                _ => false,
+            }
+    });
+    let default = ui_camera.get();
+    if usable.clone().any(|(camera, ..)| Some(camera) == default) {
+        return;
+    }
+    let camera = match usable.max_by_key(|(camera, settings, _)| (settings.order, *camera)) {
+        Some((camera, ..)) => camera,
+        None => view.commands().spawn(Camera2d).id(),
+    };
+    view.insert(UiTargetCamera(camera));
 }
 
-/// System that updates the terminal texture each frame
-fn render_terminal_to_handle(
-    softatui: ResMut<RatatuiContext>,
-    mut images: ResMut<Assets<Image>>,
-    my_handle: Res<TerminalRender>,
-) {
-    let width = softatui.backend().get_pixmap_width() as u32;
-    let height = softatui.backend().get_pixmap_height() as u32;
-
-    let mut image = images.get_mut(&my_handle.0).expect("Image not found");
-    if image.width() != width || image.height() != height {
-        image.resize(Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        });
-        image.data = Some(softatui.backend().get_pixmap_data_as_rgba());
+/// The scale Bevy UI applies to this window: one logical UI pixel is this many physical pixels.
+/// A scale that is not a positive number counts as one, as `bevy_terminal` rasterizes it.
+fn ui_scale_factor(window: &Window, ui_scale: Option<&UiScale>) -> f32 {
+    let scale = window.scale_factor() * ui_scale.map_or(1.0, |scale| scale.0);
+    if scale.is_finite() && scale > 0.0 {
+        scale
     } else {
-        // efficient fast-path copy using chunks
-        let data_in = softatui.backend().get_pixmap_data();
-        let data_out = image.data.as_mut().expect("Image data missing");
-        let (pixels_in, _) = data_in.as_chunks::<3>();
-        let (pixels_out, _) = data_out.as_chunks_mut::<4>();
-        for i in 0..(width * height) as usize {
-            let px_out = &mut pixels_out[i];
-            let px_in = pixels_in[i];
-            px_out[0] = px_in[0];
-            px_out[1] = px_in[1];
-            px_out[2] = px_in[2];
-            // skip writing alpha as it is set to 255 by get_pixmap_data_as_rgba
-        }
+        1.0
     }
 }
 
-/// System that reacts to window resize
-fn handle_resize_messages(
-    mut resize_reader: MessageReader<WindowResized>,
-    mut softatui: ResMut<RatatuiContext>,
+/// Rasterizes the terminal at the scale the UI displays it, so text stays sharp on HiDPI displays.
+fn follow_window_scale(
+    window: Single<&Window, With<PrimaryWindow>>,
+    ui_scale: Option<Res<UiScale>>,
+    mut config: Single<&mut TerminalRenderConfig, With<RatatuiContext>>,
 ) {
-    for message in resize_reader.read() {
-        let cur_pix_width = softatui.backend().char_width;
-        let cur_pix_height = softatui.backend().char_height;
-        let av_wid = (message.width / cur_pix_width as f32) as u16;
-        let av_hei = (message.height / cur_pix_height as f32) as u16;
-        softatui.backend_mut().resize(av_wid, av_hei);
+    let scale = ui_scale_factor(&window, ui_scale.as_deref());
+    if config.raster.scale != scale {
+        config.raster.scale = scale;
+    }
+}
+
+/// Resizes the grid to fill the window, at the cell the terminal measured.
+///
+/// The cell is measured whatever the grid's size, so a grid too large for a texture (on the
+/// first frame, or after a jump in font size) is fitted like any other. The backend keeps what
+/// is drawn through any number of resizes: Ratatui adopts the new size, and clears, on its next
+/// draw, and an application that draws only when its state changes keeps its last frame until
+/// then.
+fn fit_to_window(
+    window: Single<&Window, With<PrimaryWindow>>,
+    ui_scale: Option<Res<UiScale>>,
+    texture: Single<&TerminalTexture, With<RatatuiContext>>,
+    mut context: ResMut<RatatuiContext>,
+) {
+    let window_size = window.resolution.physical_size().as_vec2();
+    // A minimized window has no size; keep the grid, and what is drawn in it, until it returns.
+    if window_size.min_element() <= 0.0 {
+        return;
+    }
+    let Some(cell) = texture.cell() else {
+        return;
+    };
+    // The window in the pixels the terminal is rasterized in: its own physical pixels, unless
+    // `bevy_terminal` clamped the scale. Whole pixels divide into whole cells exactly, which
+    // sizes in UI pixels do not at fractional scales.
+    let raster_per_window = cell.raster_scale() / ui_scale_factor(&window, ui_scale.as_deref());
+    // A window larger than a texture can be is filled as far as one reaches.
+    let grid = cell.grid_for(window_size * raster_per_window);
+    // Compared first, so that an unchanged context is not marked changed.
+    if grid != context.backend().grid().size() {
+        context.backend_mut().resize(grid.width, grid.height);
+    }
+}
+
+/// Shows the rendered texture at its measured size, and nothing once the context is removed
+/// (which also lets go of its image).
+fn present(
+    texture: Option<Single<&TerminalTexture, With<RatatuiContext>>>,
+    view: Single<(&mut Node, &mut ImageNode), With<TerminalView>>,
+) {
+    let (width, height, shown) = match &texture {
+        Some(texture) => match texture.measured() {
+            Some(geometry) => {
+                let size = geometry.logical_size();
+                (px(size.x), px(size.y), texture.image().clone())
+            }
+            // Not drawn yet, or failed: keep what is shown of this context, and nothing of one
+            // it replaced.
+            None if view.1.image == *texture.image() => return,
+            None => (Val::Auto, Val::Auto, ImageNode::default().image),
+        },
+        None => (Val::Auto, Val::Auto, ImageNode::default().image),
+    };
+    let (mut node, mut image) = view.into_inner();
+    // Compared first, so that an unchanged node is not laid out again.
+    if node.width != width {
+        node.width = width;
+    }
+    if node.height != height {
+        node.height = height;
+    }
+    if image.image != shown {
+        image.image = shown;
     }
 }

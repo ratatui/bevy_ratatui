@@ -1,42 +1,27 @@
-use std::fmt::Debug;
-
 use bevy::prelude::*;
-
+use bevy_terminal_ratatui::RatatuiBackend;
 use ratatui::Terminal;
 
 use crate::context::TerminalContext;
-use soft_ratatui::embedded_graphics_unicodefonts::{
-    mono_8x13_atlas, mono_8x13_bold_atlas, mono_8x13_italic_atlas,
-};
-use soft_ratatui::{EmbeddedGraphics, SoftBackend};
 
 use super::plugin::WindowedPlugin;
 
-/// Ratatui context that will set up a window and render the ratatui buffer using a 2D texture,
-/// instead of drawing to a terminal buffer.
+/// Ratatui context that draws into a cell grid which [`WindowedPlugin`] renders to a texture and
+/// displays in a window, instead of drawing to a terminal buffer.
 #[derive(Deref, DerefMut)]
-pub struct WindowedContext(Terminal<SoftBackend<EmbeddedGraphics>>);
+pub struct WindowedContext(Terminal<RatatuiBackend>);
 
-impl Debug for WindowedContext {
+/// Names the context without printing the screen it holds.
+impl std::fmt::Debug for WindowedContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "WindowedContext()")
+        f.debug_struct("WindowedContext").finish_non_exhaustive()
     }
 }
 
-impl TerminalContext<SoftBackend<EmbeddedGraphics>> for WindowedContext {
+impl TerminalContext<RatatuiBackend> for WindowedContext {
     fn init() -> Result<Self> {
-        let font_regular = mono_8x13_atlas();
-        let font_italic = mono_8x13_italic_atlas();
-        let font_bold = mono_8x13_bold_atlas();
-        let backend = SoftBackend::<EmbeddedGraphics>::new(
-            100,
-            50,
-            font_regular,
-            Some(font_bold),
-            Some(font_italic),
-        );
-        let terminal = Terminal::new(backend)?;
-        Ok(Self(terminal))
+        // A starting size only: the grid follows the window once the font has been measured.
+        Ok(Self(Terminal::new(RatatuiBackend::new(80, 24))?))
     }
 
     fn restore() -> Result<()> {

@@ -75,11 +75,25 @@ example, see the [snake example](examples/snake/README.md).
 
 - `windowed`: Render your ratatui application in a window instead of the
   terminal buffer. Reference the `demo` example for how to set up a Bevy
-  project to handle either mode. This enables only the Bevy features the
-  windowed backend itself needs — windowing, rendering, and `bevy_ui`. If your
-  app also wants audio, 3D, scenes, gamepads, image codecs or the embedded
-  default font, enable those on your own `bevy` dependency; Cargo features are
-  additive.
+  project to handle either mode, [windowed_fonts](examples/windowed_fonts.rs)
+  for custom font assets and sizing on `TerminalRenderConfig`, or
+  [windowed_system_fonts](examples/windowed_system_fonts.rs) with
+  `bevy/system_font_discovery` for OS font discovery. Rendered on the GPU via
+  [bevy_terminal](https://github.com/gold-silver-copper/bevy_terminal); enables
+  the Bevy features the windowed backend needs (windowing, rendering, text with
+  `default_font`, and `bevy_ui`) and a set of platform defaults (X11 and
+  Wayland, WebGL2, multithreading); Cargo features are additive. The default
+  font has a single face, so bold and italic text render as regular until you
+  set bold and italic faces on `TerminalRenderConfig`.
+
+  The context is a `Terminal<RatatuiBackend>` (it was soft_ratatui's
+  `SoftBackend`, whose pixmap methods are gone), which is a breaking change for
+  code naming the backend. The grid starts at 80×24 and follows the primary
+  window. Configure the terminal through the `TerminalRenderConfig` component
+  on the context, in `PostStartup` or later; see `bevy_ratatui::windowed`.
+- `scrolling-regions`: Enable Ratatui's scrolling regions for every backend.
+  Use this rather than `ratatui/scrolling-regions`, which leaves the windowed
+  backend without the methods Ratatui then requires.
 
 There are also a handful of features relating to running Bevy in `no_std` mode.
 
@@ -112,16 +126,16 @@ There are also a handful of features relating to running Bevy in `no_std` mode.
 
 ## compatibility
 
-| bevy | bevy_ratatui      |
-|------|-------------------|
-| 0.20 | 0.13.0            |
-| 0.19 | 0.11.2–0.12.0     |
-| 0.18 | 0.11.0–0.11.1     |
-| 0.17 | 0.10              |
-| 0.16 | 0.9               |
-| 0.15 | 0.7               |
-| 0.14 | 0.6               |
-| 0.13 | 0.5               |
+| bevy | bevy_ratatui             |
+|------|--------------------------|
+| 0.20 | 0.13.0–0.14.0 (upcoming) |
+| 0.19 | 0.11.2–0.12.0            |
+| 0.18 | 0.11.0–0.11.1            |
+| 0.17 | 0.10                     |
+| 0.16 | 0.9                      |
+| 0.15 | 0.7                      |
+| 0.14 | 0.6                      |
+| 0.13 | 0.5                      |
 
 ## license
 
@@ -136,6 +150,10 @@ This project is licensed under either of
    ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
 
 at your option.
+
+The fonts under [assets/fonts](assets/fonts) are used by the examples only, are
+not part of the published crate, and keep their own licenses, which sit beside
+them.
 
 ## contribution
 

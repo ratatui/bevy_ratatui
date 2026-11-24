@@ -47,7 +47,7 @@ fn main() -> Result<()> {
 
     #[cfg(feature = "windowed")]
     app.add_plugins((
-        DefaultPlugins.set(ImagePlugin::default_nearest()),
+        DefaultPlugins,
         RatatuiPlugins {
             enable_input_forwarding: true,
             ..default()

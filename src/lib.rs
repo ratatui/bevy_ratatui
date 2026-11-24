@@ -113,7 +113,37 @@ pub mod translation {
     pub use super::crossterm_context::translation::*;
 }
 
+/// The windowed backend: the plugin, the backend the context draws into, and the renderer's
+/// configuration and inspection types.
+///
+/// The context is a resource that also carries the renderer's components. Set fonts, sizing,
+/// theme and cursor on its [`TerminalRenderConfig`](windowed::TerminalRenderConfig) in
+/// `PostStartup` (the context is inserted in `Startup`) or at any time after, and read what was
+/// drawn from its [`TerminalTexture`](windowed::TerminalTexture):
+///
+/// ```no_run
+/// use bevy::prelude::*;
+/// use bevy_ratatui::{RatatuiContext, windowed::*};
+///
+/// fn larger_text(mut config: Single<&mut TerminalRenderConfig, With<RatatuiContext>>) {
+///     config.sizing = TerminalSizing::font(24.0);
+/// }
+/// ```
 #[cfg(feature = "windowed")]
 pub mod windowed {
     pub use super::windowed_context::plugin::WindowedPlugin;
+    /// The backend the windowed context draws into.
+    pub use bevy_terminal_ratatui::RatatuiBackend;
+    /// Renderer configuration and inspection types for the windowed terminal.
+    pub use bevy_terminal_ratatui::prelude::{
+        BlinkConfig, CellGeometry, CursorConfig, CursorStyle, FontFaces, FontHinting, FontSource,
+        GridSize, RasterConfig, TerminalFailure, TerminalGeometry, TerminalRenderConfig,
+        TerminalSizing, TerminalStats, TerminalStatus, TerminalSystems, TerminalTexture,
+        TerminalTheme,
+    };
+    /// The grid the backend draws into, as [`RatatuiBackend::grid`] returns it, and its cells.
+    pub use bevy_terminal_ratatui::prelude::{
+        CellOccupancy, CellPosition, StyleFlags, TerminalCell, TerminalColor, TerminalGrid,
+        TerminalStyle,
+    };
 }
