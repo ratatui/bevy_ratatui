@@ -1,5 +1,6 @@
 use bevy::{
     app::{Plugin, PluginGroup, PluginGroupBuilder, Startup},
+    ecs::schedule::{IntoScheduleConfigs, SystemSet},
     prelude::{Commands, Result},
 };
 
@@ -53,8 +54,28 @@ pub struct ContextPlugin;
 
 impl Plugin for ContextPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_systems(Startup, context_setup);
+        app.configure_sets(
+            Startup,
+            (
+                ContextSystems::PreSetup,
+                ContextSystems::Setup,
+                ContextSystems::PostSetup,
+            )
+                .chain(),
+        )
+        .add_systems(Startup, context_setup.in_set(ContextSystems::Setup));
     }
+}
+
+/// System sets for managing the lifecycle of `RatatuiContext`
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ContextSystems {
+    /// Runs before `RatatuiContext` is added
+    PreSetup,
+    /// Adds the `RatatuiContext` to the ECS world
+    Setup,
+    /// Runs after `RatatuiContext` is added
+    PostSetup,
 }
 
 /// A startup system that sets up the terminal context.
