@@ -94,7 +94,13 @@ pub struct CrosstermContext {
 impl CrosstermContext {
     /// Start a terminal session, installing a process-wide panic hook before changing modes.
     pub fn init() -> Result<Self> {
+        if std::thread::panicking() {
+            return Err("cannot initialize a terminal while panicking".into());
+        }
         install_hook();
+        if active().is_some() {
+            return Err("a crossterm session is already active".into());
+        }
         let terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
         let mut guard = active();
         if guard.is_some() {

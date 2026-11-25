@@ -26,11 +26,14 @@ def run(scenario, kitty=False, stdout=None, env=None):
 
     child = subprocess.Popen(
         [EXE],
-        env={**(env or os.environ), "PTY_SCENARIO": scenario},
+        env={**(os.environ if env is None else env), "PTY_SCENARIO": scenario},
         stdin=slave,
         stdout=slave if stdout is None else stdout,
         stderr=slave,
         start_new_session=True,
+        # Adopt the PTY slave as controlling terminal so `/dev/tty` sizes it even when
+        # stdout is a pipe and `$TERM`/`tput` are unavailable.
+        preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0),
     )
     out, snaps, queries, deadline = b"", [], 0, time.monotonic() + 45
     while time.monotonic() < deadline:
@@ -43,6 +46,14 @@ def run(scenario, kitty=False, stdout=None, env=None):
                 break
             out += chunk
         elif child.poll() is not None:
+            while select.select([master], [], [], 0)[0]:
+                try:
+                    chunk = os.read(master, 1 << 16)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                out += chunk
             break
         for _ in range(out.count(QUERY) - queries):
             os.write(master, (b"\x1b[?0u" if kitty else b"") + b"\x1b[?62c")
@@ -131,10 +142,15 @@ check(
 )
 
 read_fd, write_fd = os.pipe()
-os.close(read_fd)  # stdout writes fail with EPIPE after raw mode is enabled
-out, rc, before, snaps, after = run("rollback", stdout=write_fd)
+os.close(read_fd)  # `EnterAlternateScreen` fails with EPIPE after raw mode is enabled
+# Strip `$TERM` and `PATH` so `tput` cannot hide a broken controlling-terminal size lookup.
+no_tput = {k: v for k, v in os.environ.items() if k != "TERM"} | {"PATH": "/"}
+out, rc, before, snaps, after = run("rollback", stdout=write_fd, env=no_tput)
 os.close(write_fd)
-check("rollback", rc == 0 and snaps == [before] and after == before, "raw mode not rolled back")
+if os.environ.get("PTY_VERBOSE"):
+    print(f"--- rollback (exit {rc})\n{out!r}")
+check("rollback", rc == 0 and snaps == [before, before], "raw mode not rolled back")
+check("rollback", after == before, "termios not restored")
 check("rollback", b"\x1b" not in out, "wrote escapes to terminal")
 
 out, rc, *_ = scenario("race", sessions=20)

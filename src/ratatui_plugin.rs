@@ -54,8 +54,8 @@ impl PluginGroup for RatatuiPlugins {
     }
 }
 
-/// Initializes the selected terminal backend during startup and removes the
-/// context on [`AppExit`].
+/// Initializes the selected terminal backend during startup, and removes the
+/// context on [`AppExit`] in terminal (crossterm) mode.
 pub struct ContextPlugin {
     /// Enable the Kitty keyboard protocol when supported by the terminal.
     pub enable_kitty_protocol: bool,

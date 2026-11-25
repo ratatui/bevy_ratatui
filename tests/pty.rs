@@ -106,6 +106,8 @@ mod scenario {
                 RatatuiContext::restore().expect("restored");
                 RatatuiContext::restore().expect("second restore is no-op");
                 assert!(!old.kitty_enabled());
+                #[cfg(feature = "mouse")]
+                assert!(!old.mouse_enabled());
                 let new = RatatuiContext::init().expect("resumed context");
                 assert!(new.enable_kitty_protocol().expect("kitty resumed"));
                 #[cfg(feature = "mouse")]
@@ -115,12 +117,23 @@ mod scenario {
                 drop(new);
             }
             "rollback" => {
-                let first = RatatuiContext::init().expect_err("broken stdout must fail");
-                assert!(!first.to_string().contains("already active"));
-                snapshot();
-                // A second attempt must still fail on I/O, not because `ACTIVE` latched.
-                let second = RatatuiContext::init().expect_err("stdout is still broken");
-                assert!(!second.to_string().contains("already active"));
+                // With the PTY as controlling terminal and stdout a closed pipe,
+                // both attempts must get past sizing and raw mode and fail writing
+                // `EnterAlternateScreen` with `BrokenPipe`. The second attempt also
+                // proves `ACTIVE` did not latch.
+                for _ in 0..2 {
+                    let err = RatatuiContext::init().expect_err("broken stdout must fail");
+                    let kind = err
+                        .downcast_ref::<std::io::Error>()
+                        .map(std::io::Error::kind);
+                    assert_eq!(kind, Some(std::io::ErrorKind::BrokenPipe), "{err}");
+                    assert!(
+                        !bevy_ratatui::crossterm::terminal::is_raw_mode_enabled()
+                            .expect("raw mode query"),
+                        "raw mode leaked after failed init"
+                    );
+                    snapshot();
+                }
             }
             "race" => {
                 for _ in 0..20 {
