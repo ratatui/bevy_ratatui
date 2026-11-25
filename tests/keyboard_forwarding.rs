@@ -304,13 +304,14 @@ fn distinct_unicode_holds_match_case_changing_releases() {
 }
 
 #[test]
-fn unicode_matching_handles_final_sigma_and_keeps_dotless_i_distinct() {
+fn unicode_matching_folds_sharp_s_and_final_sigma() {
     let mut app = kitty();
-    step(&mut app, &[key('Σ', Press), key('ı', Press)]);
+    step(&mut app, &[key('ß', Press), key('Σ', Press)]);
+    let up = step(&mut app, &[key('ẞ', Release)]);
+    assert_eq!(up[0].logical_key, logical('ß'));
+    assert!(logical_keys(&app).pressed(logical('Σ')));
     let up = step(&mut app, &[key('ς', Release)]);
     assert_eq!(up[0].logical_key, logical('Σ'));
-    assert!(logical_keys(&app).pressed(logical('ı')));
-    step(&mut app, &[key('ı', Release)]);
     assert_empty(&app);
 }
 
@@ -401,6 +402,107 @@ fn policy_changes_reconcile_held_keys_without_replaying_input() {
     app.insert_resource(ReleaseKey::Immediate);
     assert_eq!(edges(&step(&mut app, &[])), [(KeyCode::KeyB, Released)]);
     step(&mut app, &[]);
+    assert_empty(&app);
+}
+
+#[test]
+fn switching_to_emulated_release_times_out_native_holds() {
+    let mut app = kitty();
+    step(&mut app, &[key('a', Press)]);
+    step(&mut app, &[]);
+    assert!(physical(&app).pressed(KeyCode::KeyA));
+    app.insert_resource(EmulationPolicy::Manual(Capability::KEY_RELEASE));
+    assert_eq!(edges(&step(&mut app, &[])), [(KeyCode::KeyA, Released)]);
+    assert_empty(&app);
+}
+
+#[test]
+fn learning_native_releases_hands_timed_holds_to_the_terminal() {
+    let ctrl = |kind| event(C::Modifier(LeftControl), M::CONTROL, kind);
+    for timer in [
+        ReleaseKey::Immediate,
+        ReleaseKey::FrameCount(1),
+        ReleaseKey::Duration(Duration::ZERO),
+    ] {
+        let mut app = app();
+        app.insert_resource(timer);
+        step(
+            &mut app,
+            &[ctrl(Press), event(C::Char('a'), M::CONTROL, Press)],
+        );
+        let up = step(&mut app, &[key('a', Release)]);
+        assert_eq!(edges(&up), [(KeyCode::KeyA, Released)], "{timer:?}");
+        for _ in 0..3 {
+            assert!(step(&mut app, &[]).is_empty(), "{timer:?}");
+        }
+        assert!(physical(&app).pressed(KeyCode::ControlLeft));
+        let up = step(&mut app, &[ctrl(Release)]);
+        assert_eq!(edges(&up), [(KeyCode::ControlLeft, Released)]);
+        assert_empty(&app);
+    }
+
+    // A release learned between presses, across frames or within one, ends supersession.
+    for frames in [
+        &[
+            &[key('a', Press)][..],
+            &[key('x', Release)],
+            &[key('b', Press)],
+        ][..],
+        &[&[key('a', Press), key('x', Release), key('b', Press)]],
+    ] {
+        let mut app = app();
+        app.insert_resource(ReleaseKey::OnNextKey);
+        for events in frames {
+            step(&mut app, events);
+        }
+        step(&mut app, &[]);
+        assert!(physical(&app).all_pressed([KeyCode::KeyA, KeyCode::KeyB]));
+        step(&mut app, &[key('a', Release)]);
+        assert!(physical(&app).pressed(KeyCode::KeyB));
+        step(&mut app, &[key('b', Release)]);
+        assert_empty(&app);
+    }
+}
+
+#[test]
+fn a_chord_keeps_its_held_native_modifier_alive() {
+    for policy in [
+        EmulationPolicy::Manual(Capability::ALL),
+        EmulationPolicy::Automatic,
+    ] {
+        let mut app = app();
+        app.insert_resource(policy);
+        step(
+            &mut app,
+            &[event(C::Modifier(LeftControl), M::CONTROL, Press)],
+        );
+        let chord = step(&mut app, &[event(C::Char('a'), M::CONTROL, Press)]);
+        assert_eq!(edges(&chord), [(KeyCode::KeyA, Pressed)], "{policy:?}");
+        assert!(physical(&app).all_pressed([KeyCode::ControlLeft, KeyCode::KeyA]));
+        let up = step(&mut app, &[]);
+        assert_eq!(
+            edges(&up),
+            [(KeyCode::ControlLeft, Released), (KeyCode::KeyA, Released)]
+        );
+        assert_empty(&app);
+    }
+}
+
+#[test]
+fn keypad_navigation_does_not_collide_with_dedicated_keys() {
+    let mut app = kitty();
+    let pad = |kind| KeyEvent {
+        state: KeyEventState::KEYPAD,
+        ..event(C::Left, M::empty(), kind)
+    };
+    step(&mut app, &[event(C::Left, M::empty(), Press)]);
+    let down = step(&mut app, &[pad(Press)]);
+    assert_eq!(edges(&down), [(KeyCode::Numpad4, Pressed)]);
+    assert_eq!(down[0].logical_key, Key::ArrowLeft);
+    let up = step(&mut app, &[pad(Release)]);
+    assert_eq!(edges(&up), [(KeyCode::Numpad4, Released)]);
+    assert!(physical(&app).pressed(KeyCode::ArrowLeft));
+    step(&mut app, &[event(C::Left, M::empty(), Release)]);
     assert_empty(&app);
 }
 
@@ -527,6 +629,17 @@ fn maps_characters_keypad_and_named_keys() {
             false,
         ),
         (C::Enter, keypad, NumpadEnter, Key::Enter, None, false),
+        (C::Left, keypad, Numpad4, Key::ArrowLeft, None, false),
+        (C::Right, keypad, Numpad6, Key::ArrowRight, None, false),
+        (C::Up, keypad, Numpad8, Key::ArrowUp, None, false),
+        (C::Down, keypad, Numpad2, Key::ArrowDown, None, false),
+        (C::Home, keypad, Numpad7, Key::Home, None, false),
+        (C::End, keypad, Numpad1, Key::End, None, false),
+        (C::PageUp, keypad, Numpad9, Key::PageUp, None, false),
+        (C::PageDown, keypad, Numpad3, Key::PageDown, None, false),
+        (C::Insert, keypad, Numpad0, Key::Insert, None, false),
+        (C::Delete, keypad, NumpadDecimal, Key::Delete, None, false),
+        (C::Left, none, ArrowLeft, Key::ArrowLeft, None, false),
         (C::BackTab, none, Tab, Key::Tab, None, true),
         (C::F(0), none, unknown, unknown_key.clone(), None, false),
         (C::F(36), none, unknown, unknown_key.clone(), None, false),

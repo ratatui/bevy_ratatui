@@ -97,7 +97,7 @@ pub enum InputSet {
     Pre,
     /// Emit the crossterm messages.
     EmitCrossterm,
-    /// Emit the bevy messages if [`crate::translation::TranslationPlugin`] has been added.
+    /// Emit the bevy messages if `TranslationPlugin` has been added.
     EmitBevy,
     /// Run after all input messages are emitted.
     Post,
@@ -116,6 +116,10 @@ pub struct KeyMessage(pub event::KeyEvent);
 pub struct MouseMessage(pub event::MouseEvent);
 
 /// A message that is sent when the terminal gains or loses focus.
+///
+/// Requires focus reporting, which `TranslationPlugin` enables, as does
+/// [`CrosstermContext::enable_focus_reporting`](crate::context::CrosstermContext::enable_focus_reporting).
+/// Each poll batch of terminal events ends at a focus change.
 #[derive(Message, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum FocusMessage {
     Gained,
@@ -131,6 +135,9 @@ pub struct ResizeMessage(pub Size);
 pub struct PasteMessage(pub String);
 
 /// System that reads events from crossterm and forwards them as Bevy messages.
+///
+/// A batch ends after a `FocusLost` or `FocusGained` event, so input on either side of a
+/// focus change is handled on separate frames.
 pub fn crossterm_event_system(
     mut messages: MessageWriter<CrosstermMessage>,
     mut keys: MessageWriter<KeyMessage>,

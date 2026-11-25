@@ -64,14 +64,13 @@ fn same_key(a: &KeyboardInput, b: &KeyboardInput) -> bool {
     }
     match (&a.logical_key, &b.logical_key) {
         (Key::Character(a), Key::Character(b)) => {
-            // Lower then upper also unifies final sigma and sharp S. Dotless i
-            // belongs to its own class under locale-independent case folding.
+            // Lower then upper also unifies final sigma and sharp S.
             fn folded(s: &str) -> impl Iterator<Item = char> {
                 s.chars()
                     .flat_map(char::to_lowercase)
                     .flat_map(char::to_uppercase)
             }
-            a == b || (a.as_str() != "ı" && b.as_str() != "ı" && folded(a).eq(folded(b)))
+            a == b || folded(a).eq(folded(b))
         }
         (a, b) => a == b,
     }
@@ -183,6 +182,17 @@ impl Held {
             _ => Source::Key(flags),
         };
         let timed = emulate_release;
+        if let Source::Key(flags) = source
+            && !flags.is_empty()
+        {
+            // A chord keeps the real modifiers it uses alive with it.
+            for d in &mut self.0 {
+                if matches!(d.source, Source::Native(bit) if flags.intersects(bit)) {
+                    d.seen = frame.number;
+                    d.at = frame.now;
+                }
+            }
+        }
         if let Some(d) = self.0.iter_mut().find(|d| same_key(&d.press, &press)) {
             // A real left modifier can take ownership of its synthetic press.
             let promoted = matches!(d.source, Source::Synthetic(_));
@@ -196,7 +206,10 @@ impl Held {
             press.repeat = true;
             press.logical_key = d.press.logical_key.clone();
         } else {
-            if event.kind == KeyEventKind::Press && matches!(source, Source::Key(_)) {
+            if emulate_release
+                && event.kind == KeyEventKind::Press
+                && matches!(source, Source::Key(_))
+            {
                 self.release(|d| d.timed && matches!(d.source, Source::Key(_)), out);
             }
             self.0.push(frame.down(press.clone(), source, timed));
@@ -314,18 +327,27 @@ pub(super) fn forward_keys(
         |d| {
             d.timed
                 && d.seen != frame.number
-                && ((policy_changed && !emulate_release)
-                    || match *timer {
+                && if emulate_release {
+                    match *timer {
                         ReleaseKey::Immediate => true,
                         ReleaseKey::FrameCount(n) => {
                             frame.number.wrapping_sub(d.seen) >= u64::from(n)
                         }
                         ReleaseKey::Duration(delay) => frame.now.saturating_sub(d.at) >= delay,
                         ReleaseKey::OnNextKey => false,
-                    })
+                    }
+                } else {
+                    policy_changed
+                }
         },
         &mut out,
     );
+    if !emulate_release {
+        // After any policy-switch cleanup, native releases own all remaining holds.
+        for d in &mut keyboard.held.0 {
+            d.timed = false;
+        }
+    }
     keyboard.held.strip_modifiers(stripped);
     keyboard
         .held

@@ -5,8 +5,15 @@
 //! Raw [`KeyMessage`](crate::event::KeyMessage)s remain available.
 //!
 //! A terminal tap received in one poll normally spans two updates so state-based consumers
-//! see the key down. Focus loss releases all held keys, including emulated modifiers.
-//! Kitty sessions start with native key releases enabled. Other sessions learn from input.
+//! see the key down. Focus loss flushes deferred taps, then releases all held keys, including
+//! emulated modifiers. Kitty sessions start with native key releases enabled. Other sessions
+//! learn from input.
+//!
+//! Under [`ReleaseKey::Immediate`], legacy terminals report a held key only as OS autorepeat
+//! presses, so it toggles up and down between repeat ticks. Use a [`ReleaseKey::Duration`]
+//! longer than the repeat delay for a sustained hold. Crossterm key events carry no scan codes,
+//! so physical positions are inferred from a US layout and shifted symbols on other layouts may
+//! map to the wrong [`KeyCode`].
 //!
 //! # Migrating to 0.14
 //!
@@ -65,17 +72,14 @@ impl Plugin for TranslationPlugin {
     }
 }
 
-fn configure_session(
-    context: Option<Res<CrosstermContext>>,
-    mut detected: ResMut<Detected>,
-) -> Result {
+fn configure_session(context: Option<Res<CrosstermContext>>, mut detected: ResMut<Detected>) {
     if let Some(context) = context {
         if context.kitty_enabled() {
             detected.0.insert(Capability::KEY_RELEASE);
         }
-        context.enable_focus_reporting()?;
+        // Focus reporting is optional; terminals without it simply never lose focus.
+        let _ = context.enable_focus_reporting();
     }
-    Ok(())
 }
 
 bitflags::bitflags! {
@@ -99,6 +103,8 @@ pub struct Detected(pub Capability);
 pub enum EmulationPolicy {
     /// Emulate any capability not yet detected, while still supplementing
     /// flag-only modifier chords when no matching native modifier key is held.
+    /// That chord synthesis continues even once [`Detected`] is
+    /// [`Capability::ALL`] and [`Self::emulate_capabilities`] reports nothing.
     #[default]
     Automatic,
     /// Emulate the selected capabilities.

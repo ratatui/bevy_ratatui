@@ -87,6 +87,16 @@ mod scenario {
             }
             #[cfg(feature = "keyboard")]
             "forwarding" | "forwarding_panic" => forwarding(scenario == "forwarding_panic"),
+            #[cfg(feature = "keyboard")]
+            "focus_unavailable" => {
+                let context = RatatuiContext::init().expect("a context");
+                RatatuiContext::restore().expect("restored");
+                assert!(context.enable_focus_reporting().is_err());
+                App::new()
+                    .insert_resource(context)
+                    .add_plugins(bevy_ratatui::translation::TranslationPlugin)
+                    .update();
+            }
             "direct" => {
                 let mut context = RatatuiContext::init().expect("a context");
                 if RatatuiContext::init().is_err() {
@@ -167,6 +177,7 @@ mod scenario {
             crossterm::event,
             translation::{Capability, Detected},
         };
+        use std::time::{Duration, Instant};
 
         let mut app = App::new();
         app.add_plugins((
@@ -185,31 +196,29 @@ mod scenario {
         assert!(context.focus_reporting_enabled());
         context.enable_focus_reporting().expect("already enabled");
 
-        // The driver writes one batch: a, focus lost, b, focus gained, c.
+        // The driver writes a, focus lost, b, focus gained, c, which may arrive in
+        // several reads. Each focus change ends a poll batch, so every phase below
+        // is visible after exactly one update.
         eprint!("<SEND-KEYS>");
-        assert!(event::poll(std::time::Duration::from_secs(5)).expect("driver input"));
-        app.update();
-        let keys = app.world().resource::<ButtonInput<KeyCode>>();
-        assert!(keys.just_released(KeyCode::KeyA));
-        assert_eq!(keys.get_pressed().count(), 0);
-        assert_eq!(
-            app.world()
-                .resource::<ButtonInput<Key>>()
-                .get_pressed()
-                .count(),
-            0
-        );
-        app.update();
-        let keys = app.world().resource::<ButtonInput<KeyCode>>();
-        assert!(keys.pressed(KeyCode::KeyB));
-        assert!(!keys.pressed(KeyCode::KeyC));
-        app.update();
-        app.update();
-        assert!(
-            app.world()
-                .resource::<ButtonInput<KeyCode>>()
-                .all_pressed([KeyCode::KeyB, KeyCode::KeyC])
-        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut phase = |what: &str, done: fn(&ButtonInput<KeyCode>, &ButtonInput<Key>) -> bool| {
+            while !done(app.world().resource(), app.world().resource()) {
+                assert!(Instant::now() < deadline, "timed out waiting for {what}");
+                event::poll(Duration::from_millis(10)).expect("driver input");
+                app.update();
+            }
+        };
+        phase("focus loss to clear a", |keys, logical| {
+            keys.just_released(KeyCode::KeyA)
+                && keys.get_pressed().count() == 0
+                && logical.get_pressed().count() == 0
+        });
+        phase("b without c", |keys, _| {
+            keys.pressed(KeyCode::KeyB) && !keys.pressed(KeyCode::KeyC)
+        });
+        phase("b and c", |keys, _| {
+            keys.all_pressed([KeyCode::KeyB, KeyCode::KeyC])
+        });
         if panic_after_input {
             panic!("panic with focus reporting enabled");
         }

@@ -150,6 +150,14 @@ pub(super) fn map(event: KeyEvent, window: Entity) -> (KeyboardInput, Mods) {
     use TermKey::*;
     let mut mods = event.modifiers;
     let mut text = None;
+    // With Num Lock off, keypad navigation keeps its own physical keys.
+    let keypad = |numpad, dedicated| {
+        if event.state.contains(KeyEventState::KEYPAD) {
+            numpad
+        } else {
+            dedicated
+        }
+    };
     let (key_code, logical_key) = match event.code {
         Char(c) => {
             let (code, shifted) = character(c, event.state);
@@ -175,20 +183,22 @@ pub(super) fn map(event: KeyEvent, window: Entity) -> (KeyboardInput, Mods) {
             mods.insert(Mods::SHIFT);
             (KeyCode::Tab, Key::Tab)
         }
-        Enter if event.state.contains(KeyEventState::KEYPAD) => (KeyCode::NumpadEnter, Key::Enter),
         Backspace => (KeyCode::Backspace, Key::Backspace),
-        Enter => (KeyCode::Enter, Key::Enter),
-        Left => (KeyCode::ArrowLeft, Key::ArrowLeft),
-        Right => (KeyCode::ArrowRight, Key::ArrowRight),
-        Up => (KeyCode::ArrowUp, Key::ArrowUp),
-        Down => (KeyCode::ArrowDown, Key::ArrowDown),
-        Home => (KeyCode::Home, Key::Home),
-        End => (KeyCode::End, Key::End),
-        PageUp => (KeyCode::PageUp, Key::PageUp),
-        PageDown => (KeyCode::PageDown, Key::PageDown),
+        Enter => (keypad(KeyCode::NumpadEnter, KeyCode::Enter), Key::Enter),
+        Left => (keypad(KeyCode::Numpad4, KeyCode::ArrowLeft), Key::ArrowLeft),
+        Right => (
+            keypad(KeyCode::Numpad6, KeyCode::ArrowRight),
+            Key::ArrowRight,
+        ),
+        Up => (keypad(KeyCode::Numpad8, KeyCode::ArrowUp), Key::ArrowUp),
+        Down => (keypad(KeyCode::Numpad2, KeyCode::ArrowDown), Key::ArrowDown),
+        Home => (keypad(KeyCode::Numpad7, KeyCode::Home), Key::Home),
+        End => (keypad(KeyCode::Numpad1, KeyCode::End), Key::End),
+        PageUp => (keypad(KeyCode::Numpad9, KeyCode::PageUp), Key::PageUp),
+        PageDown => (keypad(KeyCode::Numpad3, KeyCode::PageDown), Key::PageDown),
         Tab => (KeyCode::Tab, Key::Tab),
-        Delete => (KeyCode::Delete, Key::Delete),
-        Insert => (KeyCode::Insert, Key::Insert),
+        Delete => (keypad(KeyCode::NumpadDecimal, KeyCode::Delete), Key::Delete),
+        Insert => (keypad(KeyCode::Numpad0, KeyCode::Insert), Key::Insert),
         Esc => (KeyCode::Escape, Key::Escape),
         CapsLock => (KeyCode::CapsLock, Key::CapsLock),
         ScrollLock => (KeyCode::ScrollLock, Key::ScrollLock),

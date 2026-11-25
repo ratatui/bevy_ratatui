@@ -90,7 +90,7 @@ def session(scenario, out, before, after, kitty, mouse, sessions):
     check(scenario, out.count(PUSH) == out.count(POP) == (sessions if kitty else 0), "kitty mismatch")
     check(scenario, out.count(MOUSE_ON) == out.count(MOUSE_OFF) == (sessions if mouse else 0), "mouse mismatch")
     if sessions == 1:
-        for setup in [PUSH] * kitty + [MOUSE_ON] * mouse:
+        for setup in [PUSH] * kitty + [MOUSE_ON] * mouse + [FOCUS_ON] * focus:
             check(scenario, out.find(ENTER) < out.find(setup), f"{setup!r} before enter")
         if PANIC in out:
             panic = out.index(PANIC)
@@ -136,6 +136,8 @@ out, rc, *_ = scenario("hook_after")
 check("hook_after", b"<LATE-HOOK>" in out and PANIC in out, "late hook not preserved")
 
 if os.environ.get("PTY_KEYBOARD", "1"):
+    out, rc, *_ = scenario("focus_unavailable")
+    check("focus_unavailable", rc == 0, f"startup failed: {out!r}")
     out, rc, *_ = scenario("forwarding", kitty=True)
     check("forwarding", rc == 0, f"unexpected exit {rc}: {out!r}")
     out, rc, *_ = scenario("forwarding_panic", kitty=True)
