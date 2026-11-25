@@ -50,6 +50,15 @@ jobs:
       - name: cargo test --doc
         run: cargo test --locked --all-features --doc
 
+      - name: cargo test --test pty (crossterm)
+        run: cargo test --locked --no-default-features --features crossterm,mouse,keyboard --test pty
+
+      - name: cargo test --test pty (panic=abort)
+        env:
+          RUSTFLAGS: -Cpanic=abort
+          CARGO_TARGET_DIR: target/pty-abort
+        run: cargo test --locked --no-default-features --features crossterm,mouse,keyboard --test pty
+
   os-check:
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.os }} - stable

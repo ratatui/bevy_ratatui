@@ -2,7 +2,7 @@ use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     prelude::*,
 };
-use bevy_ratatui::{RatatuiContext, RatatuiPlugins, event::KeyMessage, kitty::KittyEnabled};
+use bevy_ratatui::{RatatuiContext, RatatuiPlugins, event::KeyMessage};
 use ratatui::crossterm::event::KeyEventKind;
 use ratatui::text::Text;
 
@@ -25,11 +25,11 @@ struct LastKeypress(pub KeyMessage);
 
 fn draw_scene_system(
     mut context: ResMut<RatatuiContext>,
-    kitty_enabled: Option<Res<KittyEnabled>>,
     last_keypress: Option<Res<LastKeypress>>,
 ) -> Result {
+    let kitty_enabled = context.kitty_enabled();
     context.draw(|frame| {
-        let mut text = Text::raw(if kitty_enabled.is_some() {
+        let mut text = Text::raw(if kitty_enabled {
             "Kitty protocol enabled!"
         } else {
             "Kitty protocol not supported in this terminal."

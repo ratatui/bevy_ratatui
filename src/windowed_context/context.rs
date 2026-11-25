@@ -1,14 +1,12 @@
+use std::io;
+
 use bevy::prelude::*;
 use bevy_terminal_ratatui::RatatuiBackend;
 use ratatui::Terminal;
 
-use crate::context::TerminalContext;
-
-use super::plugin::WindowedPlugin;
-
-/// Ratatui context that draws into a cell grid which [`WindowedPlugin`] renders to a texture and
+/// Ratatui context that draws into a cell grid which [`WindowedPlugin`](super::plugin::WindowedPlugin) renders to a texture and
 /// displays in a window, instead of drawing to a terminal buffer.
-#[derive(Deref, DerefMut)]
+#[derive(Resource, Deref, DerefMut)]
 pub struct WindowedContext(Terminal<RatatuiBackend>);
 
 /// Names the context without printing the screen it holds.
@@ -18,22 +16,36 @@ impl std::fmt::Debug for WindowedContext {
     }
 }
 
-impl TerminalContext<RatatuiBackend> for WindowedContext {
-    fn init() -> Result<Self> {
-        // A starting size only: the grid follows the window once the font has been measured.
+impl WindowedContext {
+    /// Create a terminal backed by the windowed renderer.
+    pub fn init() -> Result<Self> {
         Ok(Self(Terminal::new(RatatuiBackend::new(80, 24))?))
     }
 
-    fn restore() -> Result<()> {
+    /// No-op: the windowed renderer acquires no terminal modes.
+    pub fn restore() -> Result {
         Ok(())
     }
 
-    fn configure_plugin_group(
-        _group: &crate::RatatuiPlugins,
-        mut builder: bevy::app::PluginGroupBuilder,
-    ) -> bevy::app::PluginGroupBuilder {
-        builder = builder.add(WindowedPlugin);
+    /// Always `Ok(false)`: the windowed renderer uses Bevy keyboard input.
+    pub fn enable_kitty_protocol(&self) -> io::Result<bool> {
+        Ok(false)
+    }
 
-        builder
+    /// Always `false`: the windowed renderer uses Bevy keyboard input.
+    pub fn kitty_enabled(&self) -> bool {
+        false
+    }
+
+    /// No-op: the windowed renderer uses Bevy mouse input.
+    #[cfg(feature = "mouse")]
+    pub fn enable_mouse_capture(&self) -> io::Result<()> {
+        Ok(())
+    }
+
+    /// Always `false`: the windowed renderer uses Bevy mouse input.
+    #[cfg(feature = "mouse")]
+    pub fn mouse_enabled(&self) -> bool {
+        false
     }
 }
