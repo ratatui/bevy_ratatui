@@ -70,9 +70,6 @@ pub use ratatui::crossterm;
 pub mod context {
     #[cfg(feature = "crossterm")]
     pub use super::crossterm_context::context::CrosstermContext;
-    #[doc(hidden)]
-    #[cfg(feature = "crossterm")]
-    pub use super::crossterm_context::context::SessionWriter;
     pub use super::ratatui_plugin::ContextPlugin;
     #[cfg(feature = "windowed")]
     pub use super::windowed_context::context::WindowedContext;

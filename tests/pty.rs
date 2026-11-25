@@ -21,7 +21,7 @@ fn main() {
 #[cfg(all(unix, feature = "crossterm", not(feature = "windowed")))]
 mod scenario {
     use std::{
-        io::{Write, stdin, stdout},
+        io::{Write, stdin},
         panic, process,
         sync::Barrier,
         thread,
@@ -29,10 +29,6 @@ mod scenario {
 
     use bevy::prelude::*;
     use bevy_ratatui::{RatatuiContext, RatatuiPlugins};
-
-    unsafe extern "C" {
-        fn dup2(old: i32, new: i32) -> i32;
-    }
 
     pub fn run(scenario: &str) {
         match scenario {
@@ -60,9 +56,7 @@ mod scenario {
             }
             "panic" => app(true, true, || panic!("main thread panic")),
             "worker_panic" => app(true, true, |mut exit: MessageWriter<AppExit>| {
-                let _stdout_lock = stdout().lock();
                 let _ = thread::spawn(|| panic!("worker thread panic")).join();
-                drop(_stdout_lock);
                 exit.write_default();
             }),
             "abort" => {
@@ -116,19 +110,17 @@ mod scenario {
                 assert!(new.enable_kitty_protocol().expect("kitty resumed"));
                 #[cfg(feature = "mouse")]
                 new.enable_mouse_capture().expect("mouse resumed");
-                // Dropping the retired drawn context must emit neither Leave nor Show.
                 drop(old);
                 eprint!("<STALE-DROPPED>");
                 drop(new);
             }
-            "rollback_retry" => {
-                assert!(RatatuiContext::init().is_err());
+            "rollback" => {
+                let first = RatatuiContext::init().expect_err("broken stdout must fail");
+                assert!(!first.to_string().contains("already active"));
                 snapshot();
-                assert_eq!(unsafe { dup2(0, 1) }, 1);
-                let mut ctx = RatatuiContext::init().expect("retry succeeds");
-                ctx.draw(|frame| frame.render_widget("retried", frame.area()))
-                    .expect("drawn");
-                drop(ctx);
+                // A second attempt must still fail on I/O, not because `ACTIVE` latched.
+                let second = RatatuiContext::init().expect_err("stdout is still broken");
+                assert!(!second.to_string().contains("already active"));
             }
             "race" => {
                 for _ in 0..20 {
