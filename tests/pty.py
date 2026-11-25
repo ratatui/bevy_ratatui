@@ -10,6 +10,7 @@ ENTER, LEAVE, SHOW = b"\x1b[?1049h", b"\x1b[?1049l", b"\x1b[?25h"
 PUSH, POP = b"\x1b[>15u", b"\x1b[<1u"
 MOUSE_ON = b"\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1015h\x1b[?1006h"
 MOUSE_OFF = b"\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l"
+FOCUS_ON, FOCUS_OFF = b"\x1b[?1004h", b"\x1b[?1004l"
 QUERY, PANIC = b"\x1b[?u\x1b[c", b"panicked at"
 ABORTED = -signal.SIGABRT
 failures = []
@@ -36,6 +37,7 @@ def run(scenario, kitty=False, stdout=None, env=None):
         preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0),
     )
     out, snaps, queries, deadline = b"", [], 0, time.monotonic() + 45
+    sent_keys = False
     while time.monotonic() < deadline:
         if select.select([master], [], [], 0.05)[0]:
             try:
@@ -55,6 +57,9 @@ def run(scenario, kitty=False, stdout=None, env=None):
                     break
                 out += chunk
             break
+        if not sent_keys and b"<SEND-KEYS>" in out:
+            os.write(master, b"a\x1b[Ob\x1b[Ic")
+            sent_keys = True
         for _ in range(out.count(QUERY) - queries):
             os.write(master, (b"\x1b[?0u" if kitty else b"") + b"\x1b[?62c")
             queries += 1
@@ -76,7 +81,9 @@ def check(scenario, condition, what):
 
 
 def session(scenario, out, before, after, kitty, mouse, sessions):
-    teardown = (POP if kitty else b"") + (MOUSE_OFF if mouse else b"") + LEAVE + SHOW
+    focus = scenario in ("forwarding", "forwarding_panic")
+    check(scenario, out.count(FOCUS_ON) == out.count(FOCUS_OFF) == int(focus), "focus mismatch")
+    teardown = (FOCUS_OFF if focus else b"") + (POP if kitty else b"") + (MOUSE_OFF if mouse else b"") + LEAVE + SHOW
     check(scenario, after == before, "termios not restored to exact baseline")
     check(scenario, out.count(ENTER) == out.count(LEAVE) == sessions, "not one leave per enter")
     check(scenario, out.count(teardown) == sessions, f"teardown not {teardown!r} x{sessions}")
@@ -127,6 +134,12 @@ check("abort", rc == ABORTED and out.find(LEAVE) < out.find(b"<USER-HOOK>"), "ho
 
 out, rc, *_ = scenario("hook_after")
 check("hook_after", b"<LATE-HOOK>" in out and PANIC in out, "late hook not preserved")
+
+if os.environ.get("PTY_KEYBOARD", "1"):
+    out, rc, *_ = scenario("forwarding", kitty=True)
+    check("forwarding", rc == 0, f"unexpected exit {rc}: {out!r}")
+    out, rc, *_ = scenario("forwarding_panic", kitty=True)
+    check("forwarding_panic", rc in (101, ABORTED) and b"panic with focus reporting enabled" in out, "panic path")
 
 out, rc, *_ = scenario("direct")
 check("direct", rc == 0 and out.find(ENTER) < out.find(b"<REFUSED>") < out.find(LEAVE), "refusal")

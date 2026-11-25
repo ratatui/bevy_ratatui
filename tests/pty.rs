@@ -11,6 +11,10 @@ fn main() {
             let status = std::process::Command::new("python3")
                 .arg(script)
                 .arg(exe)
+                .env(
+                    "PTY_KEYBOARD",
+                    if cfg!(feature = "keyboard") { "1" } else { "" },
+                )
                 .env("PTY_MOUSE", if cfg!(feature = "mouse") { "1" } else { "" })
                 .status();
             assert!(status.expect("python3").success(), "pty scenarios failed");
@@ -81,6 +85,8 @@ mod scenario {
                     .add_systems(Update, (draw, || panic!("panic after a late hook")).chain())
                     .run();
             }
+            #[cfg(feature = "keyboard")]
+            "forwarding" | "forwarding_panic" => forwarding(scenario == "forwarding_panic"),
             "direct" => {
                 let mut context = RatatuiContext::init().expect("a context");
                 if RatatuiContext::init().is_err() {
@@ -151,6 +157,61 @@ mod scenario {
                 }
             }
             _ => panic!("unknown scenario {scenario}"),
+        }
+    }
+
+    #[cfg(feature = "keyboard")]
+    fn forwarding(panic_after_input: bool) {
+        use bevy::input::keyboard::Key;
+        use bevy_ratatui::{
+            crossterm::event,
+            translation::{Capability, Detected},
+        };
+
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            RatatuiPlugins {
+                enable_input_forwarding: true,
+                ..plugins(true, false)
+            },
+        ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<Detected>().0,
+            Capability::KEY_RELEASE
+        );
+        let context = app.world().resource::<RatatuiContext>();
+        assert!(context.focus_reporting_enabled());
+        context.enable_focus_reporting().expect("already enabled");
+
+        // The driver writes one batch: a, focus lost, b, focus gained, c.
+        eprint!("<SEND-KEYS>");
+        assert!(event::poll(std::time::Duration::from_secs(5)).expect("driver input"));
+        app.update();
+        let keys = app.world().resource::<ButtonInput<KeyCode>>();
+        assert!(keys.just_released(KeyCode::KeyA));
+        assert_eq!(keys.get_pressed().count(), 0);
+        assert_eq!(
+            app.world()
+                .resource::<ButtonInput<Key>>()
+                .get_pressed()
+                .count(),
+            0
+        );
+        app.update();
+        let keys = app.world().resource::<ButtonInput<KeyCode>>();
+        assert!(keys.pressed(KeyCode::KeyB));
+        assert!(!keys.pressed(KeyCode::KeyC));
+        app.update();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .all_pressed([KeyCode::KeyB, KeyCode::KeyC])
+        );
+        if panic_after_input {
+            panic!("panic with focus reporting enabled");
         }
     }
 

@@ -87,11 +87,11 @@ pub mod event {
     };
 }
 
-#[cfg(feature = "crossterm")]
-pub mod translation {
-    #[cfg(feature = "keyboard")]
-    pub use super::crossterm_context::translation::*;
-}
+#[cfg(all(feature = "crossterm", feature = "keyboard"))]
+pub use crossterm_context::translation;
+
+#[cfg(all(feature = "crossterm", not(feature = "keyboard")))]
+pub mod translation {}
 
 /// The windowed backend: the plugin, the backend the context draws into, and the renderer's
 /// configuration and inspection types.

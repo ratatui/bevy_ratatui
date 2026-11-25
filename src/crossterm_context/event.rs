@@ -72,7 +72,6 @@ fn configure_input_sets(app: &mut App) {
         (
             InputSet::Pre,
             InputSet::EmitCrossterm,
-            InputSet::CheckEmulation,
             InputSet::EmitBevy,
             InputSet::Post,
         )
@@ -98,8 +97,6 @@ pub enum InputSet {
     Pre,
     /// Emit the crossterm messages.
     EmitCrossterm,
-    /// Check for emulation.
-    CheckEmulation,
     /// Emit the bevy messages if [`crate::translation::TranslationPlugin`] has been added.
     EmitBevy,
     /// Run after all input messages are emitted.
@@ -164,7 +161,11 @@ pub fn crossterm_event_system(
                 resize.write(ResizeMessage(Size::new(columns, rows)));
             }
         }
+        let focus_boundary = matches!(event, event::Event::FocusLost | event::Event::FocusGained);
         messages.write(CrosstermMessage(event));
+        if focus_boundary {
+            break;
+        }
     }
     Ok(())
 }
@@ -199,7 +200,6 @@ mod tests {
         app.init_resource::<InputOrder>()
             .add_systems(PreUpdate, record_pre.in_set(InputSet::Pre))
             .add_systems(PreUpdate, record_crossterm.in_set(InputSet::EmitCrossterm))
-            .add_systems(PreUpdate, record_emulation.in_set(InputSet::CheckEmulation))
             .add_systems(PreUpdate, record_bevy.in_set(InputSet::EmitBevy))
             .add_systems(PreUpdate, record_post.in_set(InputSet::Post));
 
@@ -210,7 +210,6 @@ mod tests {
             [
                 InputSet::Pre,
                 InputSet::EmitCrossterm,
-                InputSet::CheckEmulation,
                 InputSet::EmitBevy,
                 InputSet::Post,
             ]
@@ -223,10 +222,6 @@ mod tests {
 
     fn record_crossterm(mut order: ResMut<InputOrder>) {
         order.0.push(InputSet::EmitCrossterm);
-    }
-
-    fn record_emulation(mut order: ResMut<InputOrder>) {
-        order.0.push(InputSet::CheckEmulation);
     }
 
     fn record_bevy(mut order: ResMut<InputOrder>) {

@@ -1,14 +1,15 @@
-use std::ops::DerefMut;
-
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
-    input::{ButtonState, keyboard::KeyboardInput},
+    input::{
+        ButtonState,
+        keyboard::{Key, KeyboardInput},
+    },
     prelude::*,
 };
 use bevy_ratatui::{RatatuiContext, RatatuiPlugins};
 use bevy_ratatui::{
     event::KeyMessage,
-    translation::{Capability, Detected, Emulate, EmulationPolicy, ReleaseKey},
+    translation::{Capability, Detected, EmulationPolicy, ReleaseKey},
 };
 use ratatui::crossterm::event::KeyEventKind;
 use ratatui::text::Text;
@@ -23,14 +24,6 @@ fn main() -> Result<()> {
             ..default()
         })
         .add_plugins(ScheduleRunnerPlugin::run_loop(wait_duration))
-        .add_systems(
-            PreUpdate,
-            (
-                keyboard_input_system,
-                bevy_keyboard_input_system,
-                bevy_keypresses,
-            ),
-        )
         .add_systems(Update, draw_scene_system)
         .add_systems(Update, hotkeys)
         .run();
@@ -38,26 +31,25 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-#[derive(Resource, Deref, DerefMut)]
-struct LastKeypress(pub KeyMessage);
-
-#[derive(Resource, Deref, DerefMut)]
-struct LastBevyKeypress(pub KeyboardInput);
-
-#[derive(Resource, Deref, DerefMut)]
-struct BevyKeypresses(pub Vec<KeyCode>);
-
 #[allow(clippy::too_many_arguments)]
 fn draw_scene_system(
     mut context: ResMut<RatatuiContext>,
-    last_keypress: Option<Res<LastKeypress>>,
-    last_bevy_keypress: Option<Res<LastBevyKeypress>>,
-    bevy_keypresses: Option<Res<BevyKeypresses>>,
-    emulate: Option<Res<Emulate>>,
+    mut keys: MessageReader<KeyMessage>,
+    mut forwarded: MessageReader<KeyboardInput>,
+    mut last_keypress: Local<Option<KeyMessage>>,
+    mut last_bevy_keypress: Local<Option<KeyboardInput>>,
+    physical: Res<ButtonInput<KeyCode>>,
+    logical: Res<ButtonInput<Key>>,
     detected: Res<Detected>,
     release_key: Res<ReleaseKey>,
     policy: Res<EmulationPolicy>,
 ) -> Result {
+    if let Some(key) = keys.read().last() {
+        *last_keypress = Some(*key);
+    }
+    if let Some(key) = forwarded.read().last() {
+        *last_bevy_keypress = Some(key.clone());
+    }
     let kitty_enabled = context.kitty_enabled();
     context.draw(|frame| {
         let mut text = Text::raw(if kitty_enabled {
@@ -78,11 +70,6 @@ fn draw_scene_system(
             Capability::MODIFIER => "Emulate modifiers.",
             _ => "Do not emulate modifiers or key release.",
         });
-        text.push_line(if emulate.is_some() {
-            "Emulate marker is present."
-        } else {
-            "Emulate marker is not present."
-        });
         text.push_line(format!(
             "Press 'r' to cycle release key policy, currently {:?}",
             release_key
@@ -90,7 +77,7 @@ fn draw_scene_system(
 
         text.push_line("Press any key. Press 'q' to Quit.");
 
-        if let Some(key_press) = last_keypress {
+        if let Some(key_press) = *last_keypress {
             let code_string = format!("{:?}", key_press.code);
             let kind_string = match key_press.kind {
                 KeyEventKind::Press => "pressed",
@@ -101,22 +88,23 @@ fn draw_scene_system(
             text.push_line(format!("{code_string} key was {kind_string}!"));
         }
 
-        if let Some(key_press) = last_bevy_keypress {
+        if let Some(key_press) = last_bevy_keypress.as_ref() {
             let code_string = format!("{:?}", key_press.key_code);
             let kind_string = match key_press.state {
                 ButtonState::Pressed => "pressed",
                 ButtonState::Released => "released",
             };
             text.push_line("");
-            text.push_line(format!("bevy {code_string} key was {kind_string}!"));
+            let repeat = if key_press.repeat { " (repeat)" } else { "" };
+            text.push_line(format!("bevy {code_string} key was {kind_string}{repeat}!"));
         }
 
-        if let Some(key_presses) = bevy_keypresses {
-            text.push_line("");
-            for key_press in &key_presses.0 {
-                let code_string = format!("{:?}", key_press);
-                text.push_line(format!("bevy {code_string} key is pressed!"));
-            }
+        text.push_line("");
+        for key in physical.get_pressed() {
+            text.push_line(format!("bevy {key:?} key is pressed!"));
+        }
+        for key in logical.get_pressed() {
+            text.push_line(format!("logical {key:?} is pressed"));
         }
 
         frame.render_widget(text.centered(), frame.area())
@@ -129,10 +117,9 @@ fn hotkeys(
     input: Res<ButtonInput<KeyCode>>,
     mut exit: MessageWriter<AppExit>,
     mut release_key: ResMut<ReleaseKey>,
-    mut policy: ResMut<EmulationPolicy>,
 ) {
     use bevy::input::keyboard::KeyCode::*;
-    if input.just_pressed(KeyQ) | input.just_pressed(Escape) {
+    if input.just_pressed(KeyQ) || input.just_pressed(Escape) {
         exit.write_default();
     } else if input.just_pressed(KeyR) {
         use ReleaseKey::*;
@@ -142,25 +129,5 @@ fn hotkeys(
             Duration(_) => Immediate,
             Immediate => OnNextKey,
         };
-    } else if input.just_pressed(KeyP) {
-        // Mutate the policy to ensure that the Emulate marker is removed
-        // (however briefly).
-        policy.deref_mut();
     }
-}
-
-fn keyboard_input_system(mut messages: MessageReader<KeyMessage>, mut commands: Commands) {
-    for message in messages.read() {
-        commands.insert_resource(LastKeypress(*message));
-    }
-}
-
-fn bevy_keyboard_input_system(mut messages: MessageReader<KeyboardInput>, mut commands: Commands) {
-    for message in messages.read() {
-        commands.insert_resource(LastBevyKeypress(message.clone()));
-    }
-}
-
-fn bevy_keypresses(keys: Res<ButtonInput<KeyCode>>, mut commands: Commands) {
-    commands.insert_resource(BevyKeypresses(keys.get_pressed().cloned().collect()));
 }

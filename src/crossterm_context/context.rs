@@ -14,7 +14,8 @@ use ratatui::{
     crossterm::{
         ExecutableCommand, cursor,
         event::{
-            KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+            DisableFocusChange, EnableFocusChange, KeyboardEnhancementFlags,
+            PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
         },
         terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
     },
@@ -35,6 +36,7 @@ fn active() -> MutexGuard<'static, Option<Session>> {
 struct Session {
     id: u64,
     raw: bool,
+    focus: bool,
     kitty: bool,
     #[cfg(feature = "mouse")]
     mouse: bool,
@@ -63,6 +65,9 @@ impl Session {
             }
         };
 
+        if self.focus {
+            record(out.execute(DisableFocusChange).map(drop));
+        }
         if self.kitty {
             record(out.execute(PopKeyboardEnhancementFlags).map(drop));
         }
@@ -121,6 +126,7 @@ impl CrosstermContext {
             id,
             raw,
             kitty: false,
+            focus: false,
             #[cfg(feature = "mouse")]
             mouse: false,
         });
@@ -163,6 +169,26 @@ impl CrosstermContext {
         active()
             .as_ref()
             .is_some_and(|s| s.id == self.id && s.kitty)
+    }
+
+    /// Enable focus reporting for this session.
+    pub fn enable_focus_reporting(&self) -> io::Result<()> {
+        let mut guard = active();
+        let Some(session) = guard.as_mut().filter(|s| s.id == self.id) else {
+            return Err(io::Error::other("crossterm session is not active"));
+        };
+        if !session.focus {
+            stdout().execute(EnableFocusChange)?;
+            session.focus = true;
+        }
+        Ok(())
+    }
+
+    /// Whether this session reports focus changes.
+    pub fn focus_reporting_enabled(&self) -> bool {
+        active()
+            .as_ref()
+            .is_some_and(|s| s.id == self.id && s.focus)
     }
 
     /// Enable mouse capture for this session.
