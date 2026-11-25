@@ -8,7 +8,6 @@ use bevy::{
 use bevy_ratatui::{RatatuiContext, RatatuiPlugins};
 use bevy_ratatui::{
     event::KeyMessage,
-    kitty::KittyEnabled,
     translation::{Capability, Detected, Emulate, EmulationPolicy, ReleaseKey},
 };
 use ratatui::crossterm::event::KeyEventKind;
@@ -51,7 +50,6 @@ struct BevyKeypresses(pub Vec<KeyCode>);
 #[allow(clippy::too_many_arguments)]
 fn draw_scene_system(
     mut context: ResMut<RatatuiContext>,
-    kitty_enabled: Option<Res<KittyEnabled>>,
     last_keypress: Option<Res<LastKeypress>>,
     last_bevy_keypress: Option<Res<LastBevyKeypress>>,
     bevy_keypresses: Option<Res<BevyKeypresses>>,
@@ -60,8 +58,9 @@ fn draw_scene_system(
     release_key: Res<ReleaseKey>,
     policy: Res<EmulationPolicy>,
 ) -> Result {
+    let kitty_enabled = context.kitty_enabled();
     context.draw(|frame| {
-        let mut text = Text::raw(if kitty_enabled.is_some() {
+        let mut text = Text::raw(if kitty_enabled {
             "Kitty protocol enabled!"
         } else {
             "Kitty protocol not supported in this terminal."

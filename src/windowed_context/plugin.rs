@@ -69,7 +69,7 @@ impl TerminalSource for RatatuiContext {
 
 impl RatatuiSource for RatatuiContext {
     fn backend_mut(&mut self) -> &mut RatatuiBackend {
-        self.0.backend_mut()
+        ratatui::Terminal::backend_mut(self)
     }
 }
 

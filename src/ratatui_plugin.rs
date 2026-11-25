@@ -1,11 +1,6 @@
-use bevy::{
-    app::{Plugin, PluginGroup, PluginGroupBuilder, Startup},
-    prelude::{Commands, Result},
-};
+use bevy::{app::PluginGroupBuilder, prelude::*};
 
-use crate::{RatatuiContext, context::DefaultContext};
-
-use crate::context::TerminalContext;
+use crate::RatatuiContext;
 
 /// A plugin group that includes all the plugins in the Ratatui crate.
 ///
@@ -38,29 +33,71 @@ impl Default for RatatuiPlugins {
 
 impl PluginGroup for RatatuiPlugins {
     fn build(self) -> PluginGroupBuilder {
-        let mut builder = PluginGroupBuilder::start::<Self>();
-
-        builder = builder.add(ContextPlugin);
-
-        builder = DefaultContext::configure_plugin_group(&self, builder);
-
-        builder
+        let builder = PluginGroupBuilder::start::<Self>();
+        #[cfg(feature = "windowed")]
+        let builder = builder.add(crate::windowed::WindowedPlugin);
+        #[cfg(not(feature = "windowed"))]
+        let builder = builder.add(crate::event::EventPlugin::default());
+        #[cfg(all(feature = "keyboard", not(feature = "windowed")))]
+        let builder = {
+            let builder = builder.add(crate::translation::TranslationPlugin);
+            if self.enable_input_forwarding {
+                builder
+            } else {
+                builder.disable::<crate::translation::TranslationPlugin>()
+            }
+        };
+        builder.add(ContextPlugin {
+            enable_kitty_protocol: self.enable_kitty_protocol,
+            enable_mouse_capture: self.enable_mouse_capture,
+        })
     }
 }
 
-/// The plugin responsible for adding the `RatatuiContext` resource to your bevy application.
-pub struct ContextPlugin;
+/// Initializes the selected terminal backend during startup, and removes the
+/// context on [`AppExit`] in terminal (crossterm) mode.
+pub struct ContextPlugin {
+    /// Enable the Kitty keyboard protocol when supported by the terminal.
+    pub enable_kitty_protocol: bool,
+    /// Enable mouse capture when built with the `mouse` feature.
+    pub enable_mouse_capture: bool,
+}
+
+impl Default for ContextPlugin {
+    fn default() -> Self {
+        Self {
+            enable_kitty_protocol: true,
+            enable_mouse_capture: false,
+        }
+    }
+}
 
 impl Plugin for ContextPlugin {
-    fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_systems(Startup, context_setup);
+    fn build(&self, app: &mut App) {
+        #[cfg(not(feature = "windowed"))]
+        let kitty = self.enable_kitty_protocol;
+        #[cfg(all(not(feature = "windowed"), feature = "mouse"))]
+        let mouse = self.enable_mouse_capture;
+
+        app.add_systems(Startup, move |mut commands: Commands| -> Result {
+            let context = RatatuiContext::init()?;
+            #[cfg(not(feature = "windowed"))]
+            if kitty {
+                let _ = context.enable_kitty_protocol();
+            }
+            #[cfg(all(not(feature = "windowed"), feature = "mouse"))]
+            if mouse {
+                context.enable_mouse_capture()?;
+            }
+            commands.insert_resource(context);
+            Ok(())
+        });
+
+        #[cfg(not(feature = "windowed"))]
+        app.add_systems(
+            Last,
+            (|mut commands: Commands| commands.remove_resource::<RatatuiContext>())
+                .run_if(on_message::<AppExit>),
+        );
     }
-}
-
-/// A startup system that sets up the terminal context.
-pub fn context_setup(mut commands: Commands) -> Result {
-    let terminal = RatatuiContext::init()?;
-    commands.insert_resource(terminal);
-
-    Ok(())
 }

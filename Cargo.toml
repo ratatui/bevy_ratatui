@@ -60,6 +60,11 @@ name = "windowed_system_fonts"
 path = "examples/windowed_system_fonts.rs"
 required-features = ["windowed", "bevy/system_font_discovery"]
 
+[[test]]
+name = "pty"
+path = "tests/pty.rs"
+harness = false
+
 # Enable a small amount of optimization in debug mode
 [profile.dev]
 opt-level = 1
