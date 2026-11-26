@@ -821,3 +821,110 @@ fn emulate_capabilities_reflects_detected_and_deferred_events_do_not_mutate_earl
     );
     assert_empty(&app);
 }
+
+#[test]
+fn legacy_policy_switch_retires_modifier_refreshed_on_switch_frame() {
+    let mut app = app();
+    step(
+        &mut app,
+        &[event(C::Modifier(RightControl), M::CONTROL, Press)],
+    );
+    app.insert_resource(EmulationPolicy::Manual(Capability::empty()));
+    let chord = step(&mut app, &[event(C::Char('a'), M::CONTROL, Press)]);
+    assert_eq!(edges(&chord), [(KeyCode::KeyA, Pressed)]);
+    assert!(physical(&app).all_pressed([KeyCode::ControlRight, KeyCode::KeyA]));
+    // Next idle frame retires the legacy timed modifier instead of stranding it.
+    let retired = step(&mut app, &[]);
+    assert_eq!(edges(&retired), [(KeyCode::ControlRight, Released)]);
+    assert!(!physical(&app).pressed(KeyCode::ControlRight));
+}
+
+#[test]
+fn older_synthetic_modifier_is_preserved_for_same_frame_chord() {
+    let mut app = kitty();
+    step(&mut app, &[event(C::Char('a'), M::CONTROL, Press)]);
+    assert!(physical(&app).all_pressed([KeyCode::ControlLeft, KeyCode::KeyA]));
+    let batch = [
+        event(C::Char('b'), M::CONTROL, Press),
+        event(C::Modifier(RightControl), M::CONTROL, Release),
+        key('b', Release),
+    ];
+    assert_eq!(edges(&step(&mut app, &batch)), [(KeyCode::KeyB, Pressed)]);
+    assert!(physical(&app).all_pressed([KeyCode::ControlLeft, KeyCode::KeyB]));
+    assert_eq!(
+        edges(&step(&mut app, &[])),
+        [(KeyCode::ControlLeft, Released), (KeyCode::KeyB, Released)]
+    );
+    step(&mut app, &[key('a', Release)]);
+    assert_empty(&app);
+}
+
+#[test]
+fn on_next_key_supersedes_unused_standalone_modifier() {
+    let mut app = app();
+    app.insert_resource(ReleaseKey::OnNextKey);
+    step(
+        &mut app,
+        &[event(C::Modifier(RightControl), M::CONTROL, Press)],
+    );
+    // A chord using Control keeps RightControl alive.
+    let chord = step(&mut app, &[event(C::Char('a'), M::CONTROL, Press)]);
+    assert_eq!(edges(&chord), [(KeyCode::KeyA, Pressed)]);
+    assert!(physical(&app).all_pressed([KeyCode::ControlRight, KeyCode::KeyA]));
+    // An unmodified key supersedes both KeyA and unused RightControl.
+    let plain = step(&mut app, &[key('b', Press)]);
+    assert_eq!(
+        edges(&plain),
+        [
+            (KeyCode::ControlRight, Released),
+            (KeyCode::KeyA, Released),
+            (KeyCode::KeyB, Pressed),
+        ]
+    );
+    assert!(!physical(&app).pressed(KeyCode::ControlRight));
+    assert!(physical(&app).pressed(KeyCode::KeyB));
+}
+
+#[test]
+fn overlapping_media_play_and_pause_stay_distinct() {
+    let mut app = kitty();
+    let play = |kind| event(C::Media(MediaKeyCode::Play), M::empty(), kind);
+    let pause = |kind| event(C::Media(MediaKeyCode::Pause), M::empty(), kind);
+    let p1 = step(&mut app, &[play(Press)]);
+    assert_eq!(p1[0].logical_key, Key::MediaPlay);
+    assert!(!p1[0].repeat);
+    let p2 = step(&mut app, &[pause(Press)]);
+    assert_eq!(p2[0].logical_key, Key::MediaPause);
+    assert!(!p2[0].repeat);
+    let r2 = step(&mut app, &[pause(Release)]);
+    assert_eq!(r2[0].logical_key, Key::MediaPause);
+    assert_eq!(r2[0].state, Released);
+    let r1 = step(&mut app, &[play(Release)]);
+    assert_eq!(r1[0].logical_key, Key::MediaPlay);
+    assert_eq!(r1[0].state, Released);
+    assert_empty(&app);
+}
+
+#[test]
+fn queued_chord_protects_held_native_modifier_from_expiry() {
+    let mut app = app();
+    app.insert_resource(EmulationPolicy::Manual(Capability::ALL));
+    step(
+        &mut app,
+        &[
+            event(C::Modifier(RightControl), M::CONTROL, Press),
+            event(C::Char('x'), M::CONTROL, Press),
+        ],
+    );
+    let next = step(
+        &mut app,
+        &[key('x', Release), event(C::Char('x'), M::CONTROL, Press)],
+    );
+    assert_eq!(edges(&next), [(KeyCode::KeyX, Released)]);
+    assert!(physical(&app).pressed(KeyCode::ControlRight));
+    let replay = step(&mut app, &[]);
+    assert_eq!(edges(&replay), [(KeyCode::KeyX, Pressed)]);
+    assert!(physical(&app).all_pressed([KeyCode::ControlRight, KeyCode::KeyX]));
+    step(&mut app, &[]);
+    assert_empty(&app);
+}

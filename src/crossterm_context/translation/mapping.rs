@@ -32,6 +32,9 @@ fn character(c: char, state: KeyEventState) -> (KeyCode, bool) {
         NumpadAdd, NumpadSubtract, NumpadMultiply, NumpadDivide, NumpadDecimal, NumpadEqual,
         NumpadComma,
     ];
+    const _: () = assert!(BASE.len() == CODES.len());
+    const _: () = assert!(SHIFTED.len() + 1 == CODES.len());
+    const _: () = assert!(KEYPAD_CHARS.len() == KEYPAD.len());
     let code = |table: &[KeyCode], i: usize| table.get(i).copied().unwrap_or(UNKNOWN);
     if state.contains(KeyEventState::KEYPAD)
         && let Some(i) = KEYPAD_CHARS.find(c)

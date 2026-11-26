@@ -19,47 +19,69 @@ use crate::event::{FocusMessage, KeyMessage};
 const MAX_PENDING: usize = 32;
 
 #[derive(Clone, Copy)]
-enum Source {
-    Key(Mods),
-    Native(Mods),
+struct Stamp(u64, Duration);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Release {
+    Terminal,
+    Timer,
+}
+
+#[derive(Clone, Copy)]
+enum Role {
+    Key(Mods, Release),
+    Native(Mods, Release),
     Synthetic(Mods),
+}
+
+impl Role {
+    fn modifier_bit(self) -> Mods {
+        match self {
+            Self::Native(bit, _) | Self::Synthetic(bit) => bit,
+            Self::Key(..) => Mods::empty(),
+        }
+    }
+
+    fn release_mut(&mut self) -> Option<&mut Release> {
+        match self {
+            Self::Key(_, r) | Self::Native(_, r) => Some(r),
+            Self::Synthetic(_) => None,
+        }
+    }
 }
 
 #[derive(Clone)]
 struct Down {
     press: KeyboardInput,
-    source: Source,
+    role: Role,
     since: u64,
-    seen: Frame,
-    timed: bool,
+    seen: Stamp,
 }
 
 #[derive(Clone, Copy)]
 struct Frame {
-    number: u64,
-    now: Duration,
+    stamp: Stamp,
     window: Entity,
     emulate_modifiers: bool,
 }
 
 impl Frame {
-    fn down(self, press: KeyboardInput, source: Source, timed: bool) -> Down {
+    fn down(self, press: KeyboardInput, role: Role) -> Down {
         Down {
             press,
-            source,
-            since: self.number,
-            seen: self,
-            timed,
+            role,
+            since: self.stamp.0,
+            seen: self.stamp,
         }
     }
 }
 
 impl ReleaseKey {
-    fn expired(self, d: &Down, frame: Frame) -> bool {
+    fn expired(self, seen: Stamp, now: Stamp) -> bool {
         match self {
             Self::Immediate => true,
-            Self::FrameCount(n) => frame.number.wrapping_sub(d.seen.number) >= u64::from(n),
-            Self::Duration(delay) => frame.now.saturating_sub(d.seen.now) >= delay,
+            Self::FrameCount(n) => now.0.wrapping_sub(seen.0) >= u64::from(n),
+            Self::Duration(delay) => now.1.saturating_sub(seen.1) >= delay,
             Self::OnNextKey => false,
         }
     }
@@ -69,20 +91,21 @@ fn same_key(a: &KeyboardInput, b: &KeyboardInput) -> bool {
     if a.key_code != b.key_code {
         return false;
     }
-    if !matches!(a.key_code, KeyCode::Unidentified(_)) {
-        return true;
-    }
-    match (&a.logical_key, &b.logical_key) {
-        (Key::Character(a), Key::Character(b)) => {
-            // Lower then upper also unifies final sigma and sharp S.
-            fn folded(s: &str) -> impl Iterator<Item = char> {
-                s.chars()
-                    .flat_map(char::to_lowercase)
-                    .flat_map(char::to_uppercase)
+    match a.key_code {
+        KeyCode::MediaPlayPause => a.logical_key == b.logical_key,
+        KeyCode::Unidentified(_) => match (&a.logical_key, &b.logical_key) {
+            (Key::Character(a), Key::Character(b)) => {
+                // Lower then upper also unifies final sigma and sharp S.
+                fn folded(s: &str) -> impl Iterator<Item = char> {
+                    s.chars()
+                        .flat_map(char::to_lowercase)
+                        .flat_map(char::to_uppercase)
+                }
+                a == b || folded(a).eq(folded(b))
             }
-            a == b || folded(a).eq(folded(b))
-        }
-        (a, b) => a == b,
+            (a, b) => a == b,
+        },
+        _ => true,
     }
 }
 
@@ -94,7 +117,7 @@ impl Held {
     fn release(&mut self, select: impl Fn(&mut Down) -> bool, out: &mut Vec<KeyboardInput>) {
         let mut stripped = Mods::empty();
         for d in self.0.extract_if(.., select) {
-            if let Source::Native(bit) = d.source {
+            if let Role::Native(bit, _) = d.role {
                 stripped |= bit;
             }
             out.push(KeyboardInput {
@@ -109,7 +132,7 @@ impl Held {
 
     fn strip_modifiers(&mut self, stripped: Mods) {
         for d in &mut self.0 {
-            if let Source::Key(flags) = &mut d.source {
+            if let Role::Key(flags, _) = &mut d.role {
                 flags.remove(stripped);
             }
         }
@@ -119,14 +142,13 @@ impl Held {
     fn hides(&self, edge: &KeyboardInput, out: &[KeyboardInput], frame: u64) -> bool {
         let new_chord_uses = |bit: Mods| {
             self.0.iter().any(|d| {
-                d.since == frame && matches!(d.source, Source::Key(flags) if flags.intersects(bit))
+                d.since == frame && matches!(d.role, Role::Key(flags, _) if flags.intersects(bit))
             })
         };
         match edge.state {
             ButtonState::Released => self.0.iter().any(|d| {
                 same_key(&d.press, edge)
-                    && (d.since == frame
-                        || matches!(d.source, Source::Native(bit) if new_chord_uses(bit)))
+                    && (d.since == frame || new_chord_uses(d.role.modifier_bit()))
             }),
             ButtonState::Pressed => {
                 !edge.repeat
@@ -140,10 +162,10 @@ impl Held {
     fn sync_modifiers(&mut self, frame: Frame, preserve_new: bool, out: &mut Vec<KeyboardInput>) {
         let (mut flags, mut native, mut synthetic) = (Mods::empty(), Mods::empty(), Mods::empty());
         for d in &self.0 {
-            match d.source {
-                Source::Key(bits) => flags |= bits,
-                Source::Native(bit) => native |= bit,
-                Source::Synthetic(bit) => synthetic |= bit,
+            match d.role {
+                Role::Key(bits, _) => flags |= bits,
+                Role::Native(bit, _) => native |= bit,
+                Role::Synthetic(bit) => synthetic |= bit,
             }
         }
         let wanted = if frame.emulate_modifiers {
@@ -153,8 +175,8 @@ impl Held {
         };
         self.release(
             |d| {
-                matches!(d.source, Source::Synthetic(bit) if !wanted.contains(bit))
-                    && !(preserve_new && d.since == frame.number)
+                matches!(d.role, Role::Synthetic(bit) if !wanted.contains(bit))
+                    && !(preserve_new && d.since == frame.stamp.0)
             },
             out,
         );
@@ -164,8 +186,7 @@ impl Held {
             if missing.contains(bit) {
                 let (press, _) =
                     mapping::map(KeyEvent::new(TermKey::Modifier(m), bit), frame.window);
-                self.0
-                    .push(frame.down(press.clone(), Source::Synthetic(bit), false));
+                self.0.push(frame.down(press.clone(), Role::Synthetic(bit)));
                 out.push(press);
             }
         }
@@ -181,7 +202,7 @@ impl Held {
         let (mut press, flags) = mapping::map(event, frame.window);
         if event.kind == KeyEventKind::Release {
             self.release(
-                |d| !matches!(d.source, Source::Synthetic(_)) && same_key(&d.press, &press),
+                |d| !matches!(d.role, Role::Synthetic(_)) && same_key(&d.press, &press),
                 out,
             );
             if let TermKey::Modifier(m) = event.code {
@@ -190,36 +211,44 @@ impl Held {
             self.sync_modifiers(frame, false, out);
             return;
         }
-        let source = match event.code {
-            TermKey::Modifier(m) => Source::Native(mapping::modifier(m).2),
-            _ => Source::Key(flags),
+        let release = if emulate_release {
+            Release::Timer
+        } else {
+            Release::Terminal
+        };
+        let role = match event.code {
+            TermKey::Modifier(m) => Role::Native(mapping::modifier(m).2, release),
+            _ => Role::Key(flags, release),
         };
         // Any key carrying modifier flags keeps the real modifiers it uses alive.
         for d in &mut self.0 {
-            if matches!(d.source, Source::Native(bit) if flags.intersects(bit)) {
-                d.seen = frame;
+            if matches!(d.role, Role::Native(bit, _) if flags.intersects(bit)) {
+                d.seen = frame.stamp;
             }
         }
         if let Some(d) = self.0.iter_mut().find(|d| same_key(&d.press, &press)) {
             // A real left modifier can take ownership of its synthetic press.
-            let promoted = matches!(d.source, Source::Synthetic(_));
-            d.source = source;
-            d.seen = frame;
-            d.timed = emulate_release;
+            let promoted = matches!(d.role, Role::Synthetic(_));
+            d.role = role;
+            d.seen = frame.stamp;
             if promoted {
                 return;
             }
             press.repeat = true;
             press.logical_key = d.press.logical_key.clone();
         } else {
-            if emulate_release
-                && event.kind == KeyEventKind::Press
-                && matches!(source, Source::Key(_))
+            if emulate_release && event.kind == KeyEventKind::Press && matches!(role, Role::Key(..))
             {
-                self.release(|d| d.timed && matches!(d.source, Source::Key(_)), out);
+                self.release(
+                    |d| match d.role {
+                        Role::Key(_, Release::Timer) => true,
+                        Role::Native(bit, Release::Timer) => !flags.intersects(bit),
+                        _ => false,
+                    },
+                    out,
+                );
             }
-            self.0
-                .push(frame.down(press.clone(), source, emulate_release));
+            self.0.push(frame.down(press.clone(), role));
         }
         self.sync_modifiers(frame, false, out);
         out.push(press);
@@ -254,9 +283,9 @@ pub(super) fn forward_keys(
 
     let keyboard = &mut *keyboard;
     keyboard.frame = keyboard.frame.wrapping_add(1);
+    let stamp = Stamp(keyboard.frame, time.elapsed());
     let frame = Frame {
-        number: keyboard.frame,
-        now: time.elapsed(),
+        stamp,
         window: window.0,
         emulate_modifiers: policy.emulate_modifiers(),
     };
@@ -265,7 +294,9 @@ pub(super) fn forward_keys(
         && policy.emulates_release(*detected)
     {
         for d in &mut held.0 {
-            d.timed = !matches!(d.source, Source::Synthetic(_));
+            if let Some(release) = d.role.release_mut() {
+                *release = Release::Timer;
+            }
         }
     }
 
@@ -296,11 +327,7 @@ pub(super) fn forward_keys(
             frame,
             &mut edges,
         );
-        if stage
-            && edges
-                .iter()
-                .any(|edge| staged.hides(edge, &out, frame.number))
-        {
+        if stage && edges.iter().any(|edge| staged.hides(edge, &out, stamp.0)) {
             std::mem::swap(&mut staged, held);
             keyboard.pending.push(event);
             keyboard.pending.extend(events);
@@ -323,24 +350,33 @@ pub(super) fn forward_keys(
             }
             let (mapped, flags) = mapping::map(e, frame.window);
             same_key(&mapped, &d.press)
-                || matches!(d.source, Source::Native(bit) if flags.intersects(bit))
+                || matches!(d.role, Role::Native(bit, _) if flags.intersects(bit))
         })
     };
     held.release(
         |d| {
-            if !emulate_release {
-                // Hand the hold to the terminal unless a legacy policy switch needs cleanup.
-                return std::mem::take(&mut d.timed)
-                    && retire_timers
-                    && d.seen.number != frame.number;
+            let seen = d.seen;
+            let Some(release) = d.role.release_mut() else {
+                return false;
+            };
+            if *release != Release::Timer {
+                return false;
             }
-            d.timed && d.seen.number != frame.number && timer.expired(d, frame) && !queued(d)
+            if !emulate_release {
+                if !retire_timers {
+                    *release = Release::Terminal;
+                    return false;
+                }
+                // Keep a legacy hold refreshed this frame alive for one frame, then retire it.
+                return seen.0 != stamp.0;
+            }
+            seen.0 != stamp.0 && timer.expired(seen, stamp) && !queued(d)
         },
         &mut out,
     );
     held.sync_modifiers(frame, true, &mut out);
     if lost {
-        held.release(|d| matches!(d.source, Source::Key(_)), &mut out);
+        held.release(|d| matches!(d.role, Role::Key(..)), &mut out);
         held.release(|_| true, &mut out);
     }
     output.write_batch(out);
