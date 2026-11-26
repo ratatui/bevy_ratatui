@@ -489,6 +489,86 @@ fn a_chord_keeps_its_held_native_modifier_alive() {
 }
 
 #[test]
+fn a_native_modifier_press_refreshes_other_held_native_modifiers() {
+    let mut app = app();
+    app.insert_resource(EmulationPolicy::Manual(Capability::ALL));
+    step(
+        &mut app,
+        &[event(C::Modifier(RightControl), M::CONTROL, Press)],
+    );
+    let shift = event(C::Modifier(LeftShift), M::CONTROL | M::SHIFT, Press);
+    assert_eq!(
+        edges(&step(&mut app, &[shift])),
+        [(KeyCode::ShiftLeft, Pressed)]
+    );
+    assert!(physical(&app).all_pressed([KeyCode::ControlRight, KeyCode::ShiftLeft]));
+    step(&mut app, &[]);
+    assert_empty(&app);
+}
+
+#[test]
+fn releasing_an_older_modifier_does_not_hide_a_same_frame_chord() {
+    let mut app = kitty();
+    let ctrl = |kind| event(C::Modifier(RightControl), M::CONTROL, kind);
+    step(&mut app, &[ctrl(Press)]);
+    let chord = [
+        event(C::Char('a'), M::CONTROL, Press),
+        ctrl(Release),
+        key('a', Release),
+    ];
+    assert_eq!(edges(&step(&mut app, &chord)), [(KeyCode::KeyA, Pressed)]);
+    assert!(physical(&app).all_pressed([KeyCode::ControlRight, KeyCode::KeyA]));
+    assert_eq!(
+        edges(&step(&mut app, &[])),
+        [(KeyCode::ControlRight, Released), (KeyCode::KeyA, Released)]
+    );
+    assert_empty(&app);
+}
+
+#[test]
+fn timer_expiry_does_not_overtake_a_queued_repeat() {
+    let mut app = app();
+    app.insert_resource(EmulationPolicy::Manual(Capability::ALL));
+    step(&mut app, &[key('a', Press)]);
+    let shift = |kind| event(C::Modifier(LeftShift), M::SHIFT, kind);
+    let down = step(&mut app, &[shift(Press), shift(Release), key('a', Repeat)]);
+    assert_eq!(edges(&down), [(KeyCode::ShiftLeft, Pressed)]);
+    assert!(physical(&app).pressed(KeyCode::KeyA));
+    let next = step(&mut app, &[]);
+    assert_eq!(
+        edges(&next),
+        [(KeyCode::ShiftLeft, Released), (KeyCode::KeyA, Pressed)]
+    );
+    assert!(next[1].repeat);
+}
+
+#[test]
+fn policy_switch_keeps_holds_once_native_releases_are_detected() {
+    // A Kitty session hands its timer-managed hold to the terminal.
+    let mut native = kitty();
+    native.insert_resource(EmulationPolicy::Manual(Capability::KEY_RELEASE));
+    native.insert_resource(ReleaseKey::OnNextKey);
+    step(&mut native, &[key('a', Press)]);
+    native.insert_resource(EmulationPolicy::Automatic);
+    assert!(step(&mut native, &[]).is_empty());
+    step(&mut native, &[key('a', Release)]);
+    assert_empty(&native);
+
+    // So does a release learned on the switch frame itself.
+    let mut legacy = app();
+    legacy.insert_resource(EmulationPolicy::Manual(Capability::empty()));
+    step(&mut legacy, &[key('a', Press), key('b', Press)]);
+    legacy.insert_resource(EmulationPolicy::Automatic);
+    assert_eq!(
+        edges(&step(&mut legacy, &[key('b', Release)])),
+        [(KeyCode::KeyB, Released)]
+    );
+    assert!(step(&mut legacy, &[]).is_empty());
+    step(&mut legacy, &[key('a', Release)]);
+    assert_empty(&legacy);
+}
+
+#[test]
 fn keypad_navigation_does_not_collide_with_dedicated_keys() {
     let mut app = kitty();
     let pad = |kind| KeyEvent {

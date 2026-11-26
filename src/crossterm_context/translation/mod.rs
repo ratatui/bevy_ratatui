@@ -120,6 +120,11 @@ impl EmulationPolicy {
         }
     }
 
+    pub(super) fn emulates_release(self, detected: Detected) -> bool {
+        self.emulate_capabilities(&detected)
+            .contains(Capability::KEY_RELEASE)
+    }
+
     /// Whether chord modifier flags may synthesize missing left-hand modifiers.
     /// Under [`Self::Automatic`], this stays enabled even after native modifier
     /// keys have been seen so flag-only chords still work without duplicating

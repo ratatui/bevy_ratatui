@@ -15,70 +15,37 @@ const UNKNOWN_KEY: Key = Key::Unidentified(NativeKey::Unidentified);
 // where possible and preserve the exact logical character on every layout.
 fn character(c: char, state: KeyEventState) -> (KeyCode, bool) {
     use KeyCode::*;
-    const LETTERS: &[KeyCode] = &[
-        KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM, KeyN, KeyO,
-        KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
+    const BASE: &str = "abcdefghijklmnopqrstuvwxyz0123456789-=[]\\;',./` ";
+    const SHIFTED: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ)!@#$%^&*(_+{}|:\"<>?~";
+    #[rustfmt::skip]
+    const CODES: [KeyCode; 48] = [
+        KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM,
+        KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
+        Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9,
+        Minus, Equal, BracketLeft, BracketRight, Backslash, Semicolon, Quote, Comma, Period,
+        Slash, Backquote, Space,
     ];
-    const KEYPAD: &[KeyCode] = &[
-        Numpad0,
-        Numpad1,
-        Numpad2,
-        Numpad3,
-        Numpad4,
-        Numpad5,
-        Numpad6,
-        Numpad7,
-        Numpad8,
-        Numpad9,
-        NumpadAdd,
-        NumpadSubtract,
-        NumpadMultiply,
-        NumpadDivide,
-        NumpadDecimal,
-        NumpadEqual,
+    const KEYPAD_CHARS: &str = "0123456789+-*/.=,";
+    #[rustfmt::skip]
+    const KEYPAD: [KeyCode; 17] = [
+        Numpad0, Numpad1, Numpad2, Numpad3, Numpad4, Numpad5, Numpad6, Numpad7, Numpad8, Numpad9,
+        NumpadAdd, NumpadSubtract, NumpadMultiply, NumpadDivide, NumpadDecimal, NumpadEqual,
         NumpadComma,
     ];
+    let code = |table: &[KeyCode], i: usize| table.get(i).copied().unwrap_or(UNKNOWN);
     if state.contains(KeyEventState::KEYPAD)
-        && let Some(code) = "0123456789+-*/.=,".find(c).and_then(|i| KEYPAD.get(i))
+        && let Some(i) = KEYPAD_CHARS.find(c)
     {
-        return (*code, false);
+        return (code(&KEYPAD, i), false);
     }
-    if c.is_ascii_alphabetic() {
-        let index = usize::from(c.to_ascii_lowercase() as u8 - b'a');
-        return (
-            LETTERS.get(index).copied().unwrap_or(UNKNOWN),
-            c.is_ascii_uppercase() && !state.contains(KeyEventState::CAPS_LOCK),
-        );
+    if let Some(i) = BASE.find(c) {
+        return (code(&CODES, i), false);
     }
-    const SYMBOLS: &[(char, char, KeyCode)] = &[
-        ('0', ')', Digit0),
-        ('1', '!', Digit1),
-        ('2', '@', Digit2),
-        ('3', '#', Digit3),
-        ('4', '$', Digit4),
-        ('5', '%', Digit5),
-        ('6', '^', Digit6),
-        ('7', '&', Digit7),
-        ('8', '*', Digit8),
-        ('9', '(', Digit9),
-        ('-', '_', Minus),
-        ('=', '+', Equal),
-        ('[', '{', BracketLeft),
-        (']', '}', BracketRight),
-        ('\\', '|', Backslash),
-        (';', ':', Semicolon),
-        ('\'', '"', Quote),
-        (',', '<', Comma),
-        ('.', '>', Period),
-        ('/', '?', Slash),
-        ('`', '~', Backquote),
-    ];
-    SYMBOLS
-        .iter()
-        .find_map(|&(base, shifted, code)| {
-            (c == base || c == shifted).then_some((code, c == shifted))
-        })
-        .unwrap_or((if c == ' ' { Space } else { UNKNOWN }, false))
+    // Caps Lock, not Shift, explains an uppercase letter it is on for.
+    let shifted = !(c.is_ascii_uppercase() && state.contains(KeyEventState::CAPS_LOCK));
+    SHIFTED
+        .find(c)
+        .map_or((UNKNOWN, false), |i| (code(&CODES, i), shifted))
 }
 
 fn function_key(n: u8) -> (KeyCode, Key) {
@@ -118,10 +85,8 @@ pub(super) fn modifier(m: ModifierKeyCode) -> (KeyCode, Key, Mods) {
         RightAlt => (KeyCode::AltRight, Key::Alt, Mods::ALT),
         LeftSuper => (KeyCode::SuperLeft, Key::Super, Mods::SUPER),
         RightSuper => (KeyCode::SuperRight, Key::Super, Mods::SUPER),
-        LeftHyper => (KeyCode::Hyper, Key::Hyper, Mods::HYPER),
-        RightHyper => (KeyCode::Hyper, Key::Hyper, Mods::HYPER),
-        LeftMeta => (KeyCode::Meta, Key::Meta, Mods::META),
-        RightMeta => (KeyCode::Meta, Key::Meta, Mods::META),
+        LeftHyper | RightHyper => (KeyCode::Hyper, Key::Hyper, Mods::HYPER),
+        LeftMeta | RightMeta => (KeyCode::Meta, Key::Meta, Mods::META),
         IsoLevel3Shift => (KeyCode::AltRight, Key::AltGraph, Mods::empty()),
         IsoLevel5Shift => (UNKNOWN, UNKNOWN_KEY, Mods::empty()),
     }
@@ -146,19 +111,41 @@ fn media(m: MediaKeyCode) -> (KeyCode, Key) {
     }
 }
 
+// With Num Lock off, keypad navigation keeps its own physical keys.
+fn keypad_navigation(code: KeyCode) -> KeyCode {
+    use KeyCode::*;
+    match code {
+        Enter => NumpadEnter,
+        ArrowLeft => Numpad4,
+        ArrowRight => Numpad6,
+        ArrowUp => Numpad8,
+        ArrowDown => Numpad2,
+        Home => Numpad7,
+        End => Numpad1,
+        PageUp => Numpad9,
+        PageDown => Numpad3,
+        Delete => NumpadDecimal,
+        Insert => Numpad0,
+        code => code,
+    }
+}
+
 pub(super) fn map(event: KeyEvent, window: Entity) -> (KeyboardInput, Mods) {
     use TermKey::*;
     let mut mods = event.modifiers;
     let mut text = None;
-    // With Num Lock off, keypad navigation keeps its own physical keys.
-    let keypad = |numpad, dedicated| {
-        if event.state.contains(KeyEventState::KEYPAD) {
-            numpad
-        } else {
-            dedicated
-        }
-    };
-    let (key_code, logical_key) = match event.code {
+    // Expands to a match on `event.code` that maps identically named keys directly.
+    macro_rules! same_named {
+        ($($name:ident)|*; $($term:pat => $mapped:expr,)*) => {
+            match event.code {
+                $(TermKey::$name => (KeyCode::$name, Key::$name),)*
+                $($term => $mapped,)*
+            }
+        };
+    }
+    let (key_code, logical_key) = same_named! {
+        Backspace | Enter | Home | End | PageUp | PageDown | Tab | Delete | Insert | CapsLock
+            | ScrollLock | NumLock | PrintScreen | Pause;
         Char(c) => {
             let (code, shifted) = character(c, event.state);
             if shifted {
@@ -170,41 +157,18 @@ pub(super) fn map(event: KeyEvent, window: Entity) -> (KeyboardInput, Mods) {
             if event.kind != KeyEventKind::Release && !c.is_control() && !mods.intersects(command) {
                 text = Some(s.into());
             }
-            (
-                code,
-                if c == ' ' {
-                    Key::Space
-                } else {
-                    Key::Character(s.into())
-                },
-            )
-        }
+            let key = if c == ' ' { Key::Space } else { Key::Character(s.into()) };
+            (code, key)
+        },
         BackTab => {
             mods.insert(Mods::SHIFT);
             (KeyCode::Tab, Key::Tab)
-        }
-        Backspace => (KeyCode::Backspace, Key::Backspace),
-        Enter => (keypad(KeyCode::NumpadEnter, KeyCode::Enter), Key::Enter),
-        Left => (keypad(KeyCode::Numpad4, KeyCode::ArrowLeft), Key::ArrowLeft),
-        Right => (
-            keypad(KeyCode::Numpad6, KeyCode::ArrowRight),
-            Key::ArrowRight,
-        ),
-        Up => (keypad(KeyCode::Numpad8, KeyCode::ArrowUp), Key::ArrowUp),
-        Down => (keypad(KeyCode::Numpad2, KeyCode::ArrowDown), Key::ArrowDown),
-        Home => (keypad(KeyCode::Numpad7, KeyCode::Home), Key::Home),
-        End => (keypad(KeyCode::Numpad1, KeyCode::End), Key::End),
-        PageUp => (keypad(KeyCode::Numpad9, KeyCode::PageUp), Key::PageUp),
-        PageDown => (keypad(KeyCode::Numpad3, KeyCode::PageDown), Key::PageDown),
-        Tab => (KeyCode::Tab, Key::Tab),
-        Delete => (keypad(KeyCode::NumpadDecimal, KeyCode::Delete), Key::Delete),
-        Insert => (keypad(KeyCode::Numpad0, KeyCode::Insert), Key::Insert),
+        },
+        Left => (KeyCode::ArrowLeft, Key::ArrowLeft),
+        Right => (KeyCode::ArrowRight, Key::ArrowRight),
+        Up => (KeyCode::ArrowUp, Key::ArrowUp),
+        Down => (KeyCode::ArrowDown, Key::ArrowDown),
         Esc => (KeyCode::Escape, Key::Escape),
-        CapsLock => (KeyCode::CapsLock, Key::CapsLock),
-        ScrollLock => (KeyCode::ScrollLock, Key::ScrollLock),
-        NumLock => (KeyCode::NumLock, Key::NumLock),
-        PrintScreen => (KeyCode::PrintScreen, Key::PrintScreen),
-        Pause => (KeyCode::Pause, Key::Pause),
         Menu => (KeyCode::ContextMenu, Key::ContextMenu),
         KeypadBegin => (KeyCode::Numpad5, UNKNOWN_KEY),
         Null => (UNKNOWN, UNKNOWN_KEY),
@@ -213,7 +177,12 @@ pub(super) fn map(event: KeyEvent, window: Entity) -> (KeyboardInput, Mods) {
         Modifier(m) => {
             let (code, key, _) = modifier(m);
             (code, key)
-        }
+        },
+    };
+    let key_code = if event.state.contains(KeyEventState::KEYPAD) {
+        keypad_navigation(key_code)
+    } else {
+        key_code
     };
     (
         KeyboardInput {

@@ -197,8 +197,8 @@ mod scenario {
         context.enable_focus_reporting().expect("already enabled");
 
         // The driver writes a, focus lost, b, focus gained, c, which may arrive in
-        // several reads. Each focus change ends a poll batch, so every phase below
-        // is visible after exactly one update.
+        // several reads. Each focus change ends a poll batch, so phases never merge
+        // into one update, though a phase split across reads may take several.
         eprint!("<SEND-KEYS>");
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut phase = |what: &str, done: fn(&ButtonInput<KeyCode>, &ButtonInput<Key>) -> bool| {

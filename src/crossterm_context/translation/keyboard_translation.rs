@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, time::Duration};
+use std::time::Duration;
 
 #[cfg(not(feature = "windowed"))]
 use bevy::input::keyboard::KeyboardFocusLost;
@@ -30,8 +30,7 @@ struct Down {
     press: KeyboardInput,
     source: Source,
     since: u64,
-    seen: u64,
-    at: Duration,
+    seen: Frame,
     timed: bool,
 }
 
@@ -40,6 +39,7 @@ struct Frame {
     number: u64,
     now: Duration,
     window: Entity,
+    emulate_modifiers: bool,
 }
 
 impl Frame {
@@ -48,9 +48,19 @@ impl Frame {
             press,
             source,
             since: self.number,
-            seen: self.number,
-            at: self.now,
+            seen: self,
             timed,
+        }
+    }
+}
+
+impl ReleaseKey {
+    fn expired(self, d: &Down, frame: Frame) -> bool {
+        match self {
+            Self::Immediate => true,
+            Self::FrameCount(n) => frame.number.wrapping_sub(d.seen.number) >= u64::from(n),
+            Self::Duration(delay) => frame.now.saturating_sub(d.seen.now) >= delay,
+            Self::OnNextKey => false,
         }
     }
 }
@@ -80,9 +90,10 @@ fn same_key(a: &KeyboardInput, b: &KeyboardInput) -> bool {
 struct Held(Vec<Down>);
 
 impl Held {
-    fn release(&mut self, select: impl Fn(&Down) -> bool, out: &mut Vec<KeyboardInput>) -> Mods {
+    /// Releases the selected holds and strips the flags of released native modifiers.
+    fn release(&mut self, select: impl Fn(&mut Down) -> bool, out: &mut Vec<KeyboardInput>) {
         let mut stripped = Mods::empty();
-        for d in self.0.extract_if(.., |d| select(d)) {
+        for d in self.0.extract_if(.., select) {
             if let Source::Native(bit) = d.source {
                 stripped |= bit;
             }
@@ -93,29 +104,41 @@ impl Held {
                 ..d.press
             });
         }
-        stripped
+        self.strip_modifiers(stripped);
     }
 
     fn strip_modifiers(&mut self, stripped: Mods) {
-        if !stripped.is_empty() {
-            for d in &mut self.0 {
-                if let Source::Key(flags) = &mut d.source {
-                    flags.remove(stripped);
-                }
+        for d in &mut self.0 {
+            if let Source::Key(flags) = &mut d.source {
+                flags.remove(stripped);
             }
         }
     }
 
-    fn sync_modifiers(
-        &mut self,
-        emulate_modifiers: bool,
-        frame: Frame,
-        preserve_new: bool,
-        out: &mut Vec<KeyboardInput>,
-    ) {
-        let mut flags = Mods::empty();
-        let mut native = Mods::empty();
-        let mut synthetic = Mods::empty();
+    /// Whether `edge` would hide a press that this frame has published in `out`.
+    fn hides(&self, edge: &KeyboardInput, out: &[KeyboardInput], frame: u64) -> bool {
+        let new_chord_uses = |bit: Mods| {
+            self.0.iter().any(|d| {
+                d.since == frame && matches!(d.source, Source::Key(flags) if flags.intersects(bit))
+            })
+        };
+        match edge.state {
+            ButtonState::Released => self.0.iter().any(|d| {
+                same_key(&d.press, edge)
+                    && (d.since == frame
+                        || matches!(d.source, Source::Native(bit) if new_chord_uses(bit)))
+            }),
+            ButtonState::Pressed => {
+                !edge.repeat
+                    && out
+                        .iter()
+                        .any(|up| up.state == ButtonState::Released && same_key(up, edge))
+            }
+        }
+    }
+
+    fn sync_modifiers(&mut self, frame: Frame, preserve_new: bool, out: &mut Vec<KeyboardInput>) {
+        let (mut flags, mut native, mut synthetic) = (Mods::empty(), Mods::empty(), Mods::empty());
         for d in &self.0 {
             match d.source {
                 Source::Key(bits) => flags |= bits,
@@ -123,7 +146,7 @@ impl Held {
                 Source::Synthetic(bit) => synthetic |= bit,
             }
         }
-        let wanted = if emulate_modifiers {
+        let wanted = if frame.emulate_modifiers {
             flags - native
         } else {
             Mods::empty()
@@ -136,20 +159,11 @@ impl Held {
             out,
         );
         let missing = wanted - synthetic;
-        if missing.is_empty() {
-            return;
-        }
         for m in mapping::LEFT_MODIFIERS {
-            let (key_code, logical_key, bit) = mapping::modifier(m);
+            let bit = mapping::modifier(m).2;
             if missing.contains(bit) {
-                let press = KeyboardInput {
-                    key_code,
-                    logical_key,
-                    window: frame.window,
-                    text: None,
-                    state: ButtonState::Pressed,
-                    repeat: false,
-                };
+                let (press, _) =
+                    mapping::map(KeyEvent::new(TermKey::Modifier(m), bit), frame.window);
                 self.0
                     .push(frame.down(press.clone(), Source::Synthetic(bit), false));
                 out.push(press);
@@ -161,7 +175,6 @@ impl Held {
         &mut self,
         event: KeyEvent,
         emulate_release: bool,
-        emulate_modifiers: bool,
         frame: Frame,
         out: &mut Vec<KeyboardInput>,
     ) {
@@ -174,32 +187,25 @@ impl Held {
             if let TermKey::Modifier(m) = event.code {
                 self.strip_modifiers(mapping::modifier(m).2);
             }
-            self.sync_modifiers(emulate_modifiers, frame, false, out);
+            self.sync_modifiers(frame, false, out);
             return;
         }
         let source = match event.code {
             TermKey::Modifier(m) => Source::Native(mapping::modifier(m).2),
             _ => Source::Key(flags),
         };
-        let timed = emulate_release;
-        if let Source::Key(flags) = source
-            && !flags.is_empty()
-        {
-            // A chord keeps the real modifiers it uses alive with it.
-            for d in &mut self.0 {
-                if matches!(d.source, Source::Native(bit) if flags.intersects(bit)) {
-                    d.seen = frame.number;
-                    d.at = frame.now;
-                }
+        // Any key carrying modifier flags keeps the real modifiers it uses alive.
+        for d in &mut self.0 {
+            if matches!(d.source, Source::Native(bit) if flags.intersects(bit)) {
+                d.seen = frame;
             }
         }
         if let Some(d) = self.0.iter_mut().find(|d| same_key(&d.press, &press)) {
             // A real left modifier can take ownership of its synthetic press.
             let promoted = matches!(d.source, Source::Synthetic(_));
             d.source = source;
-            d.seen = frame.number;
-            d.at = frame.now;
-            d.timed = timed;
+            d.seen = frame;
+            d.timed = emulate_release;
             if promoted {
                 return;
             }
@@ -212,9 +218,10 @@ impl Held {
             {
                 self.release(|d| d.timed && matches!(d.source, Source::Key(_)), out);
             }
-            self.0.push(frame.down(press.clone(), source, timed));
+            self.0
+                .push(frame.down(press.clone(), source, emulate_release));
         }
-        self.sync_modifiers(emulate_modifiers, frame, false, out);
+        self.sync_modifiers(frame, false, out);
         out.push(press);
     }
 }
@@ -222,7 +229,7 @@ impl Held {
 #[derive(Default)]
 pub(super) struct Keyboard {
     held: Held,
-    pending: VecDeque<KeyEvent>,
+    pending: Vec<KeyEvent>,
     frame: u64,
     policy: EmulationPolicy,
 }
@@ -245,29 +252,28 @@ pub(super) fn forward_keys(
         lost |= *msg == FocusMessage::Lost;
     }
 
+    let keyboard = &mut *keyboard;
     keyboard.frame = keyboard.frame.wrapping_add(1);
     let frame = Frame {
         number: keyboard.frame,
         now: time.elapsed(),
         window: window.0,
+        emulate_modifiers: policy.emulate_modifiers(),
     };
-    let policy_changed = keyboard.policy != *policy;
-    keyboard.policy = *policy;
-    if policy_changed
-        && policy
-            .emulate_capabilities(&detected)
-            .contains(Capability::KEY_RELEASE)
+    let held = &mut keyboard.held;
+    if std::mem::replace(&mut keyboard.policy, *policy) != *policy
+        && policy.emulates_release(*detected)
     {
-        for d in &mut keyboard.held.0 {
+        for d in &mut held.0 {
             d.timed = !matches!(d.source, Source::Synthetic(_));
         }
     }
 
-    let emulate_modifiers = policy.emulate_modifiers();
     let pending = std::mem::take(&mut keyboard.pending);
     let flush = lost || pending.len().saturating_add(keys.len()) > MAX_PENDING;
     let mut events = pending.into_iter().chain(keys.read().map(|m| m.0));
     let mut edges = Vec::new();
+    // Stays empty while flushing, so nothing is staged or deferred then.
     let mut out: Vec<KeyboardInput> = Vec::new();
     let mut staged = Held::default();
     while let Some(event) = events.next() {
@@ -278,41 +284,29 @@ pub(super) fn forward_keys(
         if matches!(event.code, TermKey::Modifier(_)) {
             observed.insert(Capability::MODIFIER);
         }
-        let next_detected = Detected(observed);
-        let emulate_release = policy
-            .emulate_capabilities(&next_detected)
-            .contains(Capability::KEY_RELEASE);
-
         // Stage the entire event, including implicit modifier and supersession
         // edges. Deferring only its final release would split a chord in half.
-        if !flush && !out.is_empty() {
-            staged.0.clone_from(&keyboard.held.0);
-            staged.apply(event, emulate_release, emulate_modifiers, frame, &mut edges);
-            let hides_edge = edges.iter().any(|edge| match edge.state {
-                ButtonState::Released => keyboard
-                    .held
-                    .0
-                    .iter()
-                    .any(|d| d.since == frame.number && same_key(&d.press, edge)),
-                ButtonState::Pressed => {
-                    !edge.repeat
-                        && out
-                            .iter()
-                            .any(|up| up.state == ButtonState::Released && same_key(up, edge))
-                }
-            });
-            if hides_edge {
-                keyboard.pending.push_back(event);
-                keyboard.pending.extend(events);
-                break;
-            }
-            std::mem::swap(&mut staged, &mut keyboard.held);
-        } else {
-            keyboard
-                .held
-                .apply(event, emulate_release, emulate_modifiers, frame, &mut edges);
+        let stage = !out.is_empty();
+        if stage {
+            staged.0.clone_from(&held.0);
         }
-        detected.set_if_neq(next_detected);
+        held.apply(
+            event,
+            policy.emulates_release(Detected(observed)),
+            frame,
+            &mut edges,
+        );
+        if stage
+            && edges
+                .iter()
+                .any(|edge| staged.hides(edge, &out, frame.number))
+        {
+            std::mem::swap(&mut staged, held);
+            keyboard.pending.push(event);
+            keyboard.pending.extend(events);
+            break;
+        }
+        detected.set_if_neq(Detected(observed));
         if flush {
             output.write_batch(edges.drain(..));
         } else {
@@ -320,43 +314,34 @@ pub(super) fn forward_keys(
         }
     }
 
-    let emulate_release = policy
-        .emulate_capabilities(&detected)
-        .contains(Capability::KEY_RELEASE);
-    let stripped = keyboard.held.release(
+    let emulate_release = policy.emulates_release(*detected);
+    let retire_timers = !detected.contains(Capability::KEY_RELEASE);
+    let queued = |d: &Down| {
+        keyboard.pending.iter().any(|&e| {
+            if e.kind == KeyEventKind::Release {
+                return false;
+            }
+            let (mapped, flags) = mapping::map(e, frame.window);
+            same_key(&mapped, &d.press)
+                || matches!(d.source, Source::Native(bit) if flags.intersects(bit))
+        })
+    };
+    held.release(
         |d| {
-            d.timed
-                && d.seen != frame.number
-                && if emulate_release {
-                    match *timer {
-                        ReleaseKey::Immediate => true,
-                        ReleaseKey::FrameCount(n) => {
-                            frame.number.wrapping_sub(d.seen) >= u64::from(n)
-                        }
-                        ReleaseKey::Duration(delay) => frame.now.saturating_sub(d.at) >= delay,
-                        ReleaseKey::OnNextKey => false,
-                    }
-                } else {
-                    policy_changed
-                }
+            if !emulate_release {
+                // Hand the hold to the terminal unless a legacy policy switch needs cleanup.
+                return std::mem::take(&mut d.timed)
+                    && retire_timers
+                    && d.seen.number != frame.number;
+            }
+            d.timed && d.seen.number != frame.number && timer.expired(d, frame) && !queued(d)
         },
         &mut out,
     );
-    if !emulate_release {
-        // After any policy-switch cleanup, native releases own all remaining holds.
-        for d in &mut keyboard.held.0 {
-            d.timed = false;
-        }
-    }
-    keyboard.held.strip_modifiers(stripped);
-    keyboard
-        .held
-        .sync_modifiers(emulate_modifiers, frame, true, &mut out);
+    held.sync_modifiers(frame, true, &mut out);
     if lost {
-        keyboard
-            .held
-            .release(|d| matches!(d.source, Source::Key(_)), &mut out);
-        keyboard.held.release(|_| true, &mut out);
+        held.release(|d| matches!(d.source, Source::Key(_)), &mut out);
+        held.release(|_| true, &mut out);
     }
     output.write_batch(out);
     #[cfg(not(feature = "windowed"))]

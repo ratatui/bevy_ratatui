@@ -66,6 +66,9 @@ fn draw_scene_system(
         });
         text.push_line(match policy.emulate_capabilities(&detected) {
             Capability::ALL => "Emulate modifiers and key release.",
+            Capability::KEY_RELEASE if *policy == EmulationPolicy::Automatic => {
+                "Emulate key release and synthesize missing chord modifiers."
+            }
             Capability::KEY_RELEASE => "Emulate key release.",
             Capability::MODIFIER => "Emulate modifiers.",
             _ if *policy == EmulationPolicy::Automatic => "Synthesize missing chord modifiers.",
