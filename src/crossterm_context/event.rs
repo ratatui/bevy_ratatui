@@ -72,7 +72,6 @@ fn configure_input_sets(app: &mut App) {
         (
             InputSet::Pre,
             InputSet::EmitCrossterm,
-            InputSet::CheckEmulation,
             InputSet::EmitBevy,
             InputSet::Post,
         )
@@ -98,9 +97,7 @@ pub enum InputSet {
     Pre,
     /// Emit the crossterm messages.
     EmitCrossterm,
-    /// Check for emulation.
-    CheckEmulation,
-    /// Emit the bevy messages if [`crate::translation::TranslationPlugin`] has been added.
+    /// Emit the bevy messages if `TranslationPlugin` has been added.
     EmitBevy,
     /// Run after all input messages are emitted.
     Post,
@@ -119,6 +116,10 @@ pub struct KeyMessage(pub event::KeyEvent);
 pub struct MouseMessage(pub event::MouseEvent);
 
 /// A message that is sent when the terminal gains or loses focus.
+///
+/// Requires focus reporting, which `TranslationPlugin` enables, as does
+/// [`CrosstermContext::enable_focus_reporting`](crate::context::CrosstermContext::enable_focus_reporting).
+/// Each poll batch of terminal events ends at a focus change.
 #[derive(Message, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum FocusMessage {
     Gained,
@@ -134,6 +135,9 @@ pub struct ResizeMessage(pub Size);
 pub struct PasteMessage(pub String);
 
 /// System that reads events from crossterm and forwards them as Bevy messages.
+///
+/// A batch ends after a `FocusLost` or `FocusGained` event, so input on either side of a
+/// focus change is handled on separate frames.
 pub fn crossterm_event_system(
     mut messages: MessageWriter<CrosstermMessage>,
     mut keys: MessageWriter<KeyMessage>,
@@ -164,7 +168,11 @@ pub fn crossterm_event_system(
                 resize.write(ResizeMessage(Size::new(columns, rows)));
             }
         }
+        let focus_boundary = matches!(event, event::Event::FocusLost | event::Event::FocusGained);
         messages.write(CrosstermMessage(event));
+        if focus_boundary {
+            break;
+        }
     }
     Ok(())
 }
@@ -199,7 +207,6 @@ mod tests {
         app.init_resource::<InputOrder>()
             .add_systems(PreUpdate, record_pre.in_set(InputSet::Pre))
             .add_systems(PreUpdate, record_crossterm.in_set(InputSet::EmitCrossterm))
-            .add_systems(PreUpdate, record_emulation.in_set(InputSet::CheckEmulation))
             .add_systems(PreUpdate, record_bevy.in_set(InputSet::EmitBevy))
             .add_systems(PreUpdate, record_post.in_set(InputSet::Post));
 
@@ -210,7 +217,6 @@ mod tests {
             [
                 InputSet::Pre,
                 InputSet::EmitCrossterm,
-                InputSet::CheckEmulation,
                 InputSet::EmitBevy,
                 InputSet::Post,
             ]
@@ -223,10 +229,6 @@ mod tests {
 
     fn record_crossterm(mut order: ResMut<InputOrder>) {
         order.0.push(InputSet::EmitCrossterm);
-    }
-
-    fn record_emulation(mut order: ResMut<InputOrder>) {
-        order.0.push(InputSet::CheckEmulation);
     }
 
     fn record_bevy(mut order: ResMut<InputOrder>) {

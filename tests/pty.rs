@@ -11,6 +11,10 @@ fn main() {
             let status = std::process::Command::new("python3")
                 .arg(script)
                 .arg(exe)
+                .env(
+                    "PTY_KEYBOARD",
+                    if cfg!(feature = "keyboard") { "1" } else { "" },
+                )
                 .env("PTY_MOUSE", if cfg!(feature = "mouse") { "1" } else { "" })
                 .status();
             assert!(status.expect("python3").success(), "pty scenarios failed");
@@ -80,6 +84,18 @@ mod scenario {
                     })
                     .add_systems(Update, (draw, || panic!("panic after a late hook")).chain())
                     .run();
+            }
+            #[cfg(feature = "keyboard")]
+            "forwarding" | "forwarding_panic" => forwarding(scenario == "forwarding_panic"),
+            #[cfg(feature = "keyboard")]
+            "focus_unavailable" => {
+                let context = RatatuiContext::init().expect("a context");
+                RatatuiContext::restore().expect("restored");
+                assert!(context.enable_focus_reporting().is_err());
+                App::new()
+                    .insert_resource(context)
+                    .add_plugins(bevy_ratatui::translation::TranslationPlugin)
+                    .update();
             }
             "direct" => {
                 let mut context = RatatuiContext::init().expect("a context");
@@ -151,6 +167,60 @@ mod scenario {
                 }
             }
             _ => panic!("unknown scenario {scenario}"),
+        }
+    }
+
+    #[cfg(feature = "keyboard")]
+    fn forwarding(panic_after_input: bool) {
+        use bevy::input::keyboard::Key;
+        use bevy_ratatui::{
+            crossterm::event,
+            translation::{Capability, Detected},
+        };
+        use std::time::{Duration, Instant};
+
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            RatatuiPlugins {
+                enable_input_forwarding: true,
+                ..plugins(true, false)
+            },
+        ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<Detected>().0,
+            Capability::KEY_RELEASE
+        );
+        let context = app.world().resource::<RatatuiContext>();
+        assert!(context.focus_reporting_enabled());
+        context.enable_focus_reporting().expect("already enabled");
+
+        // The driver writes a, focus lost, b, focus gained, c, which may arrive in
+        // several reads. Each focus change ends a poll batch, so phases never merge
+        // into one update, though a phase split across reads may take several.
+        eprint!("<SEND-KEYS>");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut phase = |what: &str, done: fn(&ButtonInput<KeyCode>, &ButtonInput<Key>) -> bool| {
+            while !done(app.world().resource(), app.world().resource()) {
+                assert!(Instant::now() < deadline, "timed out waiting for {what}");
+                event::poll(Duration::from_millis(10)).expect("driver input");
+                app.update();
+            }
+        };
+        phase("focus loss to clear a", |keys, logical| {
+            keys.just_released(KeyCode::KeyA)
+                && keys.get_pressed().count() == 0
+                && logical.get_pressed().count() == 0
+        });
+        phase("b without c", |keys, _| {
+            keys.pressed(KeyCode::KeyB) && !keys.pressed(KeyCode::KeyC)
+        });
+        phase("b and c", |keys, _| {
+            keys.all_pressed([KeyCode::KeyB, KeyCode::KeyC])
+        });
+        if panic_after_input {
+            panic!("panic with focus reporting enabled");
         }
     }
 
