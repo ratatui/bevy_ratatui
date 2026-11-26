@@ -18,8 +18,8 @@ use crate::RatatuiContext;
 /// procedurally and requiring no system font discovery). That font has one face, and Bevy does
 /// not synthesize weight or slant, so bold and italic text look like regular text until the
 /// configuration names bold and italic faces (see the `windowed_fonts` example). Applications can
-/// supply embedded or dynamically loaded font assets on `TerminalRenderConfig` in `PostStartup` or
-/// swap them in any `Update` system while running.
+/// supply embedded or dynamically loaded font assets on `TerminalRenderConfig` in `Startup` (or
+/// any time after), and swap them in any `Update` system while running.
 ///
 /// The plugin owns two things an application would otherwise set: the grid's size, which follows
 /// the window, and `TerminalRenderConfig::raster.scale`, which follows the window's scale factor
@@ -27,6 +27,10 @@ use crate::RatatuiContext;
 ///
 /// Add the plugin before the [`RatatuiContext`] resource is inserted, as
 /// [`RatatuiPlugins`](crate::RatatuiPlugins) does: a context that exists first is never drawn.
+/// To supply a pre-created context, insert it after adding the plugins — with
+/// `App::insert_resource`, or in `PreStartup` ordered before
+/// [`ContextSystems`](crate::ContextSystems) (see [`ContextSystems`](crate::ContextSystems) for
+/// deferred command flushing requirements).
 ///
 /// For mouse input, [`WindowedCursor`] is the cell under the cursor.
 pub struct WindowedPlugin;

@@ -92,7 +92,7 @@ example, see the [snake example](examples/snake/README.md).
   `SoftBackend`, whose pixmap methods are gone), which is a breaking change for
   code naming the backend. The grid starts at 80×24 and follows the primary
   window. Configure the terminal through the `TerminalRenderConfig` component
-  on the context, in `PostStartup` or later; see `bevy_ratatui::windowed`.
+  on the context, in `Startup` or later; see `bevy_ratatui::windowed`.
 - `scrolling-regions`: Enable Ratatui's scrolling regions for every backend.
   Use this rather than `ratatui/scrolling-regions`, which leaves the windowed
   backend without the methods Ratatui then requires.

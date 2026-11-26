@@ -81,7 +81,7 @@ def check(scenario, condition, what):
 
 
 def session(scenario, out, before, after, kitty, mouse, sessions):
-    focus = scenario in ("forwarding", "forwarding_panic")
+    focus = scenario in ("forwarding", "forwarding_panic", "startup_kitty")
     check(scenario, out.count(FOCUS_ON) == out.count(FOCUS_OFF) == int(focus), "focus mismatch")
     teardown = (FOCUS_OFF if focus else b"") + (POP if kitty else b"") + (MOUSE_OFF if mouse else b"") + LEAVE + SHOW
     check(scenario, after == before, "termios not restored to exact baseline")
@@ -142,6 +142,18 @@ if os.environ.get("PTY_KEYBOARD", "1"):
     check("forwarding", rc == 0, f"unexpected exit {rc}: {out!r}")
     out, rc, *_ = scenario("forwarding_panic", kitty=True)
     check("forwarding_panic", rc in (101, ABORTED) and b"panic with focus reporting enabled" in out, "panic path")
+
+# A context that exists before `ContextSystems` is kept: no Kitty or mouse modes.
+for name in ("preexisting_insert", "preexisting_pre_startup"):
+    out, rc, *_ = scenario(name, kitty=False, mouse=False)
+    check(name, rc == 0 and QUERY not in out, f"unexpected exit {rc} or Kitty query: {out!r}")
+
+out, rc, *_ = scenario("startup_context", kitty=True, mouse=True)
+check("startup_context", rc == 0, f"unexpected exit {rc}: {out!r}")
+
+if os.environ.get("PTY_KEYBOARD", "1"):
+    out, rc, *_ = scenario("startup_kitty", kitty=True)
+    check("startup_kitty", rc == 0, f"unexpected exit {rc}: {out!r}")
 
 out, rc, *_ = scenario("direct")
 check("direct", rc == 0 and out.find(ENTER) < out.find(b"<REFUSED>") < out.find(LEAVE), "refusal")

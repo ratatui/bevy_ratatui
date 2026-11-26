@@ -3,11 +3,12 @@
 
 use bevy::{
     camera::RenderTarget,
+    ecs::schedule::{LogLevel, ScheduleBuildSettings},
     prelude::*,
     text::{DEFAULT_FONT_DATA, TextPlugin},
     window::{PrimaryWindow, WindowRef},
 };
-use bevy_ratatui::{RatatuiContext, RatatuiPlugins, windowed::*};
+use bevy_ratatui::{ContextSystems, RatatuiContext, RatatuiPlugins, windowed::*};
 
 /// An app with a 640×400 primary window.
 fn app() -> App {
@@ -168,6 +169,153 @@ fn configuration_set_at_startup_is_kept_and_a_change_while_running_is_drawn() {
         after.grid().width < before.grid().width,
         "larger cells, fewer columns"
     );
+}
+
+/// Enforces strict ambiguity detection on `PreStartup` and `Startup`, and configures automatic
+/// deferred command flushing.
+fn strict_startup(app: &mut App, auto_insert_apply_deferred: bool) {
+    let settings = ScheduleBuildSettings {
+        auto_insert_apply_deferred,
+        ambiguity_detection: LogLevel::Error,
+        ..default()
+    };
+    app.edit_schedule(PreStartup, |s| {
+        s.set_build_settings(settings.clone());
+    });
+    app.edit_schedule(Startup, |s| {
+        s.set_build_settings(settings.clone());
+    });
+}
+
+#[derive(Resource, Default)]
+struct Ran(bool);
+
+#[test]
+fn the_context_and_its_components_are_there_in_startup() {
+    let mut app = app();
+    strict_startup(&mut app, false);
+    // Unrelated systems in both schedules must stay ambiguity-free alongside `ContextSystems`,
+    // and an unannotated `Startup` consumer must see the context and renderer components.
+    app.init_resource::<Ran>()
+        .add_systems(PreStartup, || {})
+        .add_systems(
+            Startup,
+            (
+                || {},
+                |_: Res<RatatuiContext>,
+                 mut config: Single<&mut TerminalRenderConfig, With<RatatuiContext>>,
+                 _: Single<&TerminalTexture, With<RatatuiContext>>,
+                 mut ran: ResMut<Ran>| {
+                    config.sizing = TerminalSizing::font(24.0);
+                    ran.0 = true;
+                },
+            ),
+        );
+    app.update();
+    assert!(app.world().resource::<Ran>().0, "the system was skipped");
+    frames(&mut app, 3);
+
+    // Drawn as the same configuration set later, in `PostStartup`.
+    let mut later = self::app();
+    later.add_systems(
+        PostStartup,
+        |mut config: Single<&mut TerminalRenderConfig, With<RatatuiContext>>| {
+            config.sizing = TerminalSizing::font(24.0);
+        },
+    );
+    frames(&mut later, 4);
+    let unconfigured = {
+        let mut app = self::app();
+        frames(&mut app, 4);
+        ready(&mut app).font_size()
+    };
+    let font_size = ready(&mut app).font_size();
+    assert_eq!(font_size, ready(&mut later).font_size());
+    assert_ne!(font_size, unconfigured);
+}
+
+#[test]
+fn pre_startup_after_context_systems_sees_the_context_and_its_components() {
+    let mut app = app();
+    strict_startup(&mut app, true);
+    app.init_resource::<Ran>().add_systems(
+        PreStartup,
+        (
+            || {},
+            (|_: Res<RatatuiContext>,
+              mut config: Single<&mut TerminalRenderConfig, With<RatatuiContext>>,
+              _: Single<&TerminalTexture, With<RatatuiContext>>,
+              mut ran: ResMut<Ran>| {
+                config.sizing = TerminalSizing::font(24.0);
+                ran.0 = true;
+            })
+            .after(ContextSystems),
+        ),
+    );
+    app.update();
+    assert!(app.world().resource::<Ran>().0, "the system was skipped");
+    frames(&mut app, 3);
+    configure(&mut app, |config| {
+        assert_eq!(config.sizing, TerminalSizing::font(24.0));
+    });
+    ready(&mut app);
+}
+
+#[test]
+fn a_context_inserted_before_setup_is_kept() {
+    let kept = || {
+        let mut context = RatatuiContext::init().expect("a context");
+        context
+            .draw(|frame| frame.render_widget("kept", frame.area()))
+            .expect("draw");
+        context
+    };
+    let mut inserted = app();
+    strict_startup(&mut inserted, true);
+    inserted.insert_resource(kept());
+
+    let mut pre_startup_commands = app();
+    strict_startup(&mut pre_startup_commands, true);
+    let mut context = Some(kept());
+    pre_startup_commands.add_systems(
+        PreStartup,
+        (move |mut commands: Commands| {
+            if let Some(context) = context.take() {
+                commands.insert_resource(context);
+            }
+        })
+        .before(ContextSystems),
+    );
+
+    let mut pre_startup_world = app();
+    strict_startup(&mut pre_startup_world, false);
+    let mut context = Some(kept());
+    pre_startup_world.add_systems(
+        PreStartup,
+        (move |world: &mut World| {
+            if let Some(context) = context.take() {
+                world.insert_resource(context);
+            }
+        })
+        .before(ContextSystems),
+    );
+
+    for mut app in [inserted, pre_startup_commands, pre_startup_world] {
+        // Kept and carrying its renderer components in plain `Startup`.
+        app.init_resource::<Ran>().add_systems(
+            Startup,
+            |context: Res<RatatuiContext>,
+             _: Single<&TerminalRenderConfig, With<RatatuiContext>>,
+             _: Single<&TerminalTexture, With<RatatuiContext>>,
+             mut ran: ResMut<Ran>| {
+                ran.0 = context.backend().grid().row_text(0).trim_end() == "kept";
+            },
+        );
+        frames(&mut app, 3);
+        assert!(app.world().resource::<Ran>().0, "not kept in Startup");
+        ready(&mut app);
+        assert_eq!(first_row(&app).trim_end(), "kept");
+    }
 }
 
 #[test]

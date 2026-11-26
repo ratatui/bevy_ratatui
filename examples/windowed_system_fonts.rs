@@ -144,7 +144,7 @@ fn main() -> AppExit {
             RatatuiPlugins::default(),
         ))
         .init_resource::<DemoState>()
-        .add_systems(PostStartup, configure_initial_font)
+        .add_systems(Startup, configure_initial_font)
         .add_systems(Update, (handle_input, draw_demo).chain())
         .run()
 }

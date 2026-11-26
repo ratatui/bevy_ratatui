@@ -31,8 +31,11 @@ mod scenario {
         thread,
     };
 
-    use bevy::prelude::*;
-    use bevy_ratatui::{RatatuiContext, RatatuiPlugins};
+    use bevy::{
+        ecs::schedule::{LogLevel, ScheduleBuildSettings},
+        prelude::*,
+    };
+    use bevy_ratatui::{ContextSystems, RatatuiContext, RatatuiPlugins};
 
     pub fn run(scenario: &str) {
         match scenario {
@@ -84,6 +87,81 @@ mod scenario {
                     })
                     .add_systems(Update, (draw, || panic!("panic after a late hook")).chain())
                     .run();
+            }
+            "preexisting_insert" | "preexisting_pre_startup" => {
+                let context = RatatuiContext::init().expect("a context");
+                let mut app = App::new();
+                app.add_plugins((MinimalPlugins, plugins(true, true)));
+                strict_startup(&mut app, true);
+                if scenario == "preexisting_insert" {
+                    app.insert_resource(context);
+                } else {
+                    let mut context = Some(context);
+                    app.add_systems(
+                        PreStartup,
+                        (move |mut commands: Commands| {
+                            if let Some(context) = context.take() {
+                                commands.insert_resource(context);
+                            }
+                        })
+                        .before(ContextSystems),
+                    );
+                }
+                app.add_systems(
+                    Update,
+                    (draw, |mut exit: MessageWriter<AppExit>| {
+                        exit.write_default();
+                    })
+                        .chain(),
+                )
+                .run();
+            }
+            "startup_context" => {
+                let mut app = App::new();
+                app.add_plugins((MinimalPlugins, plugins(true, true)));
+                strict_startup(&mut app, false);
+                app.add_systems(PreStartup, || {})
+                    .add_systems(
+                        Startup,
+                        (
+                            || {},
+                            |context: ResMut<RatatuiContext>,
+                             mut exit: MessageWriter<AppExit>|
+                             -> Result {
+                                assert!(context.kitty_enabled());
+                                #[cfg(feature = "mouse")]
+                                assert!(context.mouse_enabled());
+                                draw(context)?;
+                                exit.write_default();
+                                Ok(())
+                            },
+                        ),
+                    )
+                    .run();
+            }
+            #[cfg(feature = "keyboard")]
+            "startup_kitty" => {
+                use bevy_ratatui::translation::{Capability, Detected};
+
+                let mut app = App::new();
+                app.add_plugins((
+                    MinimalPlugins,
+                    RatatuiPlugins {
+                        enable_input_forwarding: true,
+                        ..plugins(false, false)
+                    },
+                ));
+                strict_startup(&mut app, false);
+                app.add_systems(Startup, |context: Res<RatatuiContext>| {
+                    assert!(context.enable_kitty_protocol().expect("kitty"));
+                });
+                app.update();
+                assert_eq!(
+                    app.world().resource::<Detected>().0,
+                    Capability::KEY_RELEASE
+                );
+                let context = app.world().resource::<RatatuiContext>();
+                assert!(context.focus_reporting_enabled());
             }
             #[cfg(feature = "keyboard")]
             "forwarding" | "forwarding_panic" => forwarding(scenario == "forwarding_panic"),
@@ -230,6 +308,22 @@ mod scenario {
             enable_mouse_capture: mouse,
             ..default()
         }
+    }
+
+    /// Enforces strict ambiguity detection on `PreStartup` and `Startup`, and configures
+    /// automatic deferred command flushing.
+    fn strict_startup(app: &mut App, auto_insert_apply_deferred: bool) {
+        let settings = ScheduleBuildSettings {
+            auto_insert_apply_deferred,
+            ambiguity_detection: LogLevel::Error,
+            ..default()
+        };
+        app.edit_schedule(PreStartup, |s| {
+            s.set_build_settings(settings.clone());
+        });
+        app.edit_schedule(Startup, |s| {
+            s.set_build_settings(settings.clone());
+        });
     }
 
     fn app<M>(kitty: bool, mouse: bool, frame: impl IntoSystem<(), (), M>) {

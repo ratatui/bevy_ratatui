@@ -7,7 +7,8 @@
 //! A terminal tap received in one poll normally spans two updates so state-based consumers
 //! see the key down. Focus loss flushes deferred taps, then releases all held keys, including
 //! emulated modifiers. Kitty sessions start with native key releases enabled. Other sessions
-//! learn from input.
+//! learn from input. The session's capabilities are seeded, and focus reporting requested, in
+//! `PostStartup`, so Kitty enabled on the context during `Startup` is seen.
 //!
 //! Under [`ReleaseKey::Immediate`], legacy terminals report a held key only as OS autorepeat
 //! presses, so it toggles up and down between repeat ticks. Use a [`ReleaseKey::Duration`]
