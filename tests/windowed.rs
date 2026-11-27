@@ -2,10 +2,15 @@
 #![cfg(feature = "windowed")]
 
 use bevy::{
-    camera::RenderTarget,
+    camera::{
+        CameraUpdateSystems, RenderTarget, RenderTargetInfo, Viewport, visibility::VisibilityPlugin,
+    },
     ecs::schedule::{LogLevel, ScheduleBuildSettings},
+    input::{ButtonState, InputPlugin, mouse::MouseButtonInput},
+    mesh::MeshPlugin,
     prelude::*,
     text::{DEFAULT_FONT_DATA, TextPlugin},
+    ui::UiPlugin,
     window::{PrimaryWindow, WindowRef},
 };
 use bevy_ratatui::{ContextSystems, RatatuiContext, RatatuiPlugins, windowed::*};
@@ -568,6 +573,51 @@ fn a_removed_context_is_no_longer_shown_and_a_new_one_is() {
     assert_eq!(view(&mut app).1, ImageNode::default().image);
 }
 
+/// Syncs each camera's `computed.target_info` from its window, standing in for Bevy's render
+/// `camera_system` in headless tests.
+fn sync_camera_targets(
+    primary: Query<&Window, With<PrimaryWindow>>,
+    windows: Query<&Window>,
+    mut cameras: Query<(&mut Camera, &RenderTarget)>,
+) {
+    let primary_window = primary.single().ok();
+    for (mut camera, target) in &mut cameras {
+        camera.computed.target_info = match target {
+            RenderTarget::Window(WindowRef::Primary) => primary_window,
+            RenderTarget::Window(WindowRef::Entity(entity)) => windows.get(*entity).ok(),
+            _ => None,
+        }
+        .map(|window| RenderTargetInfo {
+            physical_size: window.resolution.physical_size(),
+            scale_factor: window.scale_factor(),
+        });
+    }
+}
+
+/// An app with a 640×400 primary window and real Bevy UI layout, visibility propagation, and
+/// input systems running headless.
+fn ui_app() -> App {
+    let mut app = app();
+    app.add_plugins((InputPlugin, MeshPlugin, VisibilityPlugin, UiPlugin))
+        .init_asset::<TextureAtlasLayout>()
+        .add_systems(PostUpdate, sync_camera_targets.in_set(CameraUpdateSystems));
+    app
+}
+
+/// The laid-out physical rectangle of `TerminalView` in camera viewport coordinates.
+fn view_rect(app: &mut App) -> Rect {
+    let (computed, transform) = app
+        .world_mut()
+        .query_filtered::<(&ComputedNode, &UiGlobalTransform), With<ImageNode>>()
+        .single(app.world())
+        .expect("one laid-out view");
+    let content = computed.content_box();
+    Rect {
+        min: transform.transform_point2(content.min),
+        max: transform.transform_point2(content.max),
+    }
+}
+
 /// Puts the mouse at a physical pixel of the window (or outside it) and returns the cell there.
 fn cell_at(app: &mut App, pixel: Option<(f64, f64)>) -> Option<(u16, u16)> {
     window(app, |window| {
@@ -580,7 +630,7 @@ fn cell_at(app: &mut App, pixel: Option<(f64, f64)>) -> Option<(u16, u16)> {
 
 #[test]
 fn the_cursor_is_mapped_to_the_cell_under_it() {
-    let mut app = app();
+    let mut app = ui_app();
     // 645×410 leaves a gutter around the centered terminal, of half a cell at most.
     window(&mut app, |window| {
         window.resolution.set_physical_resolution(645, 410);
@@ -588,14 +638,15 @@ fn the_cursor_is_mapped_to_the_cell_under_it() {
     frames(&mut app, 4);
     let geometry = ready(&mut app);
     let (cell, grid) = (geometry.physical_cell_size(), geometry.grid());
-    let origin = (Vec2::new(645.0, 410.0) - geometry.size().as_vec2()) / 2.0;
+    let rect = view_rect(&mut app);
     assert!(
-        origin.min_element() >= 1.0,
-        "a gutter on every side: {origin}"
+        rect.min.min_element() >= 1.0,
+        "a gutter on every side: {:?}",
+        rect.min
     );
     // A pixel inside the cell at `column`, `row`.
     let inside = |column: u16, row: u16| {
-        let pixel = origin + (Vec2::new(column.into(), row.into()) + 0.5) * cell;
+        let pixel = rect.min + (Vec2::new(column.into(), row.into()) + 0.5) * cell;
         Some((f64::from(pixel.x), f64::from(pixel.y)))
     };
 
@@ -620,8 +671,10 @@ fn the_cursor_is_mapped_to_the_cell_under_it() {
     frames(&mut app, 4);
     let scaled = ready(&mut app);
     assert_ne!(scaled.physical_cell_size(), cell);
-    let origin = (Vec2::new(645.0, 410.0) - scaled.size().as_vec2()) / 2.0;
-    let pixel = origin + Vec2::new(3.5, 2.5) * scaled.physical_cell_size();
+    let scaled_rect = view_rect(&mut app);
+    let cell_size =
+        scaled_rect.size() / Vec2::new(scaled.grid().width.into(), scaled.grid().height.into());
+    let pixel = scaled_rect.min + Vec2::new(3.5, 2.5) * cell_size;
     let pixel = Some((f64::from(pixel.x), f64::from(pixel.y)));
     assert_eq!(cell_at(&mut app, pixel), Some((3, 2)));
 
@@ -631,4 +684,484 @@ fn the_cursor_is_mapped_to_the_cell_under_it() {
     });
     frames(&mut app, 2);
     assert_eq!(cell_at(&mut app, pixel), None);
+}
+
+#[test]
+fn cursor_follows_laid_out_view_under_rounding_scaling_viewport_and_clip() {
+    let mut app = ui_app();
+    // Fixed 16×16 cells in a 645×411 window guarantee an odd physical gutter on both axes at
+    // every scale factor below, so unrounded centering lands at `.5` while Taffy rounds edges.
+    let size = UVec2::new(645, 411);
+    window(&mut app, |window| {
+        window.resolution.set_physical_resolution(size.x, size.y);
+    });
+    frames(&mut app, 2);
+    configure(&mut app, |config| {
+        config.sizing = TerminalSizing::Fixed {
+            font_size: 16.0,
+            cell_size: Vec2::splat(16.0),
+        };
+    });
+
+    for (dpi, ui_scale, viewport_offset) in [
+        (1.0, 1.0, UVec2::ZERO),
+        (2.0, 1.0, UVec2::ZERO),
+        (1.5, 1.0, UVec2::ZERO),
+        (1.0, 2.0, UVec2::ZERO),
+        (1.0, 1.0, UVec2::new(4, 7)),
+    ] {
+        window(&mut app, |window| {
+            window.resolution.set_scale_factor_override(Some(dpi));
+        });
+        app.world_mut().resource_mut::<UiScale>().0 = ui_scale;
+        let viewport_size = size - viewport_offset;
+        {
+            let mut camera = app
+                .world_mut()
+                .query::<&mut Camera>()
+                .single_mut(app.world_mut())
+                .expect("one camera");
+            camera.viewport = (viewport_offset != UVec2::ZERO).then_some(Viewport {
+                physical_position: viewport_offset,
+                physical_size: viewport_size,
+                ..default()
+            });
+        }
+        frames(&mut app, 4);
+
+        let geometry = ready(&mut app);
+        let grid = geometry.grid();
+        let rect = view_rect(&mut app);
+        let min = viewport_offset.as_vec2() + rect.min;
+        let max = viewport_offset.as_vec2() + rect.max;
+
+        // Verify odd-gutter rounding on the un-offset cases: unrounded origin ends in `.5` on
+        // both axes, while the laid-out rect snaps to whole pixels.
+        if viewport_offset == UVec2::ZERO {
+            let unrounded = (size.as_vec2() - geometry.size().as_vec2()) / 2.0;
+            assert_eq!(unrounded.fract(), Vec2::splat(0.5));
+            assert_eq!(rect.min.fract(), Vec2::ZERO);
+            // Probe midway between the unrounded origin and the rounded origin: old unrounded
+            // centering would map this inside cell (0, 0) or outside depending on rounding side.
+            let outside_x = if rect.min.x > unrounded.x {
+                f64::from(min.x) - 0.25
+            } else {
+                f64::from(max.x) + 0.25
+            };
+            let outside_y = if rect.min.y > unrounded.y {
+                f64::from(min.y) - 0.25
+            } else {
+                f64::from(max.y) + 0.25
+            };
+            let mid = (min + max) / 2.0;
+            assert_eq!(cell_at(&mut app, Some((outside_x, f64::from(mid.y)))), None);
+            assert_eq!(cell_at(&mut app, Some((f64::from(mid.x), outside_y))), None);
+        }
+
+        let last = (grid.width - 1, grid.height - 1);
+        let mid = (min + max) / 2.0;
+        for (pixel, expected) in [
+            ((f64::from(min.x) - 0.01, f64::from(mid.y)), None),
+            ((f64::from(min.x), f64::from(min.y)), Some((0, 0))),
+            (
+                (f64::from(max.x.next_down()), f64::from(max.y.next_down())),
+                Some(last),
+            ),
+            ((f64::from(max.x), f64::from(mid.y)), None),
+            ((f64::from(mid.x), f64::from(max.y)), None),
+        ] {
+            assert_eq!(
+                cell_at(&mut app, Some(pixel)),
+                expected,
+                "pixel={pixel:?} dpi={dpi} ui_scale={ui_scale} viewport={viewport_offset}"
+            );
+        }
+    }
+
+    // Exact internal cell seam: multiply before dividing keeps `341 * 58 / 638 == 31` exact
+    // (whereas `341.0 / 638.0 * 58.0` rounds to `30.999999999999996`).
+    window(&mut app, |window| {
+        window.resolution.set_scale_factor_override(Some(1.0));
+        window.resolution.set_physical_resolution(638, 400);
+    });
+    app.world_mut().resource_mut::<UiScale>().0 = 1.0;
+    app.world_mut()
+        .query::<&mut Camera>()
+        .single_mut(app.world_mut())
+        .expect("one camera")
+        .viewport = None;
+    configure(&mut app, |config| {
+        config.sizing = TerminalSizing::Fixed {
+            font_size: 16.0,
+            cell_size: Vec2::new(11.0, 20.0),
+        };
+    });
+    frames(&mut app, 4);
+    let seam_geometry = ready(&mut app);
+    assert_eq!(seam_geometry.grid().width, 58);
+    assert_eq!(seam_geometry.size().x, 638);
+    let seam_rect = view_rect(&mut app);
+    assert_eq!(
+        cell_at(
+            &mut app,
+            Some((
+                f64::from(seam_rect.min.x) + 341.0,
+                f64::from(seam_rect.center().y),
+            ))
+        )
+        .map(|(col, _)| col),
+        Some(31),
+        "exact internal seam at column 31"
+    );
+
+    // Non-identity invertible `UiTransform` (translation) shifts the hit-test target with layout.
+    let before_shift = view_rect(&mut app);
+    {
+        let mut transform = app
+            .world_mut()
+            .query_filtered::<&mut UiTransform, With<ImageNode>>()
+            .single_mut(app.world_mut())
+            .expect("view transform");
+        transform.translation = Val2::px(20.0, 10.0);
+    }
+    frames(&mut app, 2);
+    let shifted = view_rect(&mut app);
+    assert_eq!(shifted.min, before_shift.min + Vec2::new(20.0, 10.0));
+    assert_eq!(
+        cell_at(
+            &mut app,
+            Some((
+                f64::from(shifted.min.x) + 1.0,
+                f64::from(shifted.min.y) + 1.0
+            ))
+        ),
+        Some((0, 0))
+    );
+    assert_eq!(
+        cell_at(
+            &mut app,
+            Some((
+                f64::from(before_shift.min.x) + 1.0,
+                f64::from(before_shift.min.y) + 1.0
+            ))
+        ),
+        None
+    );
+
+    // Reset transform and test a smaller `Camera::viewport` rejecting pixels outside it.
+    {
+        let mut transform = app
+            .world_mut()
+            .query_filtered::<&mut UiTransform, With<ImageNode>>()
+            .single_mut(app.world_mut())
+            .expect("view transform");
+        transform.translation = Val2::ZERO;
+    }
+    window(&mut app, |window| {
+        window.resolution.set_physical_resolution(800, 600);
+    });
+    let vp_pos = UVec2::new(50, 40);
+    let vp_size = UVec2::new(400, 300);
+    app.world_mut()
+        .query::<&mut Camera>()
+        .single_mut(app.world_mut())
+        .expect("one camera")
+        .viewport = Some(Viewport {
+        physical_position: vp_pos,
+        physical_size: vp_size,
+        ..default()
+    });
+    frames(&mut app, 4);
+    let vp_center = vp_pos.as_vec2() + vp_size.as_vec2() / 2.0;
+    assert!(
+        cell_at(
+            &mut app,
+            Some((f64::from(vp_center.x), f64::from(vp_center.y)))
+        )
+        .is_some()
+    );
+    assert_eq!(
+        cell_at(
+            &mut app,
+            Some((f64::from(vp_pos.x) - 1.0, f64::from(vp_center.y)))
+        ),
+        None,
+        "left of viewport"
+    );
+    assert_eq!(
+        cell_at(
+            &mut app,
+            Some((f64::from(vp_pos.x + vp_size.x), f64::from(vp_center.y)))
+        ),
+        None,
+        "at viewport right edge"
+    );
+
+    // A clipping ancestor (`Overflow::clip()`) populates `CalculatedClip` via Bevy's UI layout:
+    // pixels inside the clip box hit, while pixels outside the clip box return `None`.
+    let view_entity = app
+        .world_mut()
+        .query_filtered::<Entity, With<ImageNode>>()
+        .single(app.world())
+        .expect("one view");
+    let clipper = app
+        .world_mut()
+        .spawn(Node {
+            width: px(200.0),
+            height: px(vp_size.y as f32),
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .id();
+    app.world_mut().entity_mut(clipper).add_child(view_entity);
+    frames(&mut app, 2);
+    let inside_clip = vp_pos.as_vec2() + Vec2::new(100.0, 100.0);
+    let outside_clip = vp_pos.as_vec2() + Vec2::new(250.0, 100.0);
+    assert!(
+        cell_at(
+            &mut app,
+            Some((f64::from(inside_clip.x), f64::from(inside_clip.y)))
+        )
+        .is_some(),
+        "inside clip"
+    );
+    assert_eq!(
+        cell_at(
+            &mut app,
+            Some((f64::from(outside_clip.x), f64::from(outside_clip.y)))
+        ),
+        None,
+        "clipped out"
+    );
+}
+
+/// Returns a `ui_app` with `WindowedCursor` hovering a valid cell.
+fn hovered_ui_app() -> App {
+    let mut app = ui_app();
+    frames(&mut app, 4);
+    ready(&mut app);
+    let center = view_rect(&mut app).center();
+    assert!(cell_at(&mut app, Some((f64::from(center.x), f64::from(center.y)))).is_some());
+    app
+}
+
+#[test]
+fn stale_cursor_is_cleared_and_change_detection_stays_quiet() {
+    // 1. Without UI layout (`UiPlugin` absent), a ready texture produces `None`.
+    {
+        let mut lean = app();
+        frames(&mut lean, 4);
+        let center = ready(&mut lean).size().as_vec2() / 2.0;
+        assert_eq!(
+            cell_at(&mut lean, Some((f64::from(center.x), f64::from(center.y)))),
+            None
+        );
+    }
+
+    // 2. Stable `Some` does not trigger change detection on subsequent frames.
+    {
+        let mut app = hovered_ui_app();
+        let last_changed = app.world().resource_ref::<WindowedCursor>().last_changed();
+        frames(&mut app, 2);
+        assert_eq!(
+            app.world().resource_ref::<WindowedCursor>().last_changed(),
+            last_changed,
+            "unchanged Some cursor should not trigger change detection"
+        );
+    }
+
+    // 3. Despawning the primary window clears the cursor and keeps change detection quiet.
+    {
+        let mut app = hovered_ui_app();
+        app.world_mut().spawn(Window::default());
+        let primary = app
+            .world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .expect("primary window");
+        app.world_mut().despawn(primary);
+        frames(&mut app, 1);
+        assert_eq!(app.world().resource::<WindowedCursor>().0, None);
+        let last_changed = app.world().resource_ref::<WindowedCursor>().last_changed();
+        frames(&mut app, 2);
+        assert_eq!(
+            app.world().resource_ref::<WindowedCursor>().last_changed(),
+            last_changed
+        );
+    }
+
+    // 4. Two `PrimaryWindow`s clear the cursor quietly, and removing the duplicate recovers it.
+    {
+        let mut app = hovered_ui_app();
+        let other = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        frames(&mut app, 1);
+        assert_eq!(app.world().resource::<WindowedCursor>().0, None);
+        let last_changed = app.world().resource_ref::<WindowedCursor>().last_changed();
+        frames(&mut app, 2);
+        assert_eq!(
+            app.world().resource_ref::<WindowedCursor>().last_changed(),
+            last_changed
+        );
+        app.world_mut().entity_mut(other).remove::<PrimaryWindow>();
+        // Frame 1's `PostUpdate` restores camera target info; frame 2's `PreUpdate` recovers it.
+        frames(&mut app, 2);
+        assert!(app.world().resource::<WindowedCursor>().0.is_some());
+    }
+
+    // 5. Hiding `TerminalView` clears the cursor and restoring visibility recovers it.
+    {
+        let mut app = hovered_ui_app();
+        let view_entity = app
+            .world_mut()
+            .query_filtered::<Entity, With<ImageNode>>()
+            .single(app.world())
+            .expect("one view");
+        app.world_mut()
+            .entity_mut(view_entity)
+            .insert(Visibility::Hidden);
+        frames(&mut app, 2);
+        assert_eq!(app.world().resource::<WindowedCursor>().0, None);
+        app.world_mut()
+            .entity_mut(view_entity)
+            .insert(Visibility::Visible);
+        frames(&mut app, 2);
+        assert!(app.world().resource::<WindowedCursor>().0.is_some());
+    }
+
+    // 6. Removing `RatatuiContext` clears the cursor.
+    {
+        let mut app = hovered_ui_app();
+        app.world_mut().remove_resource::<RatatuiContext>();
+        frames(&mut app, 1);
+        assert_eq!(app.world().resource::<WindowedCursor>().0, None);
+    }
+
+    // 7. Mismatched `ImageNode` handle clears the cursor.
+    {
+        let mut app = hovered_ui_app();
+        let other_image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        app.world_mut()
+            .query::<&mut ImageNode>()
+            .single_mut(app.world_mut())
+            .expect("one view")
+            .image = other_image;
+        // Run a single `PreUpdate` before `present` restores the texture handle in `PostUpdate`,
+        // or inspect during `Update` right after `track_cursor` ran.
+        #[derive(Resource, Default)]
+        struct SeenInUpdate(WindowedCursor);
+        app.init_resource::<SeenInUpdate>().add_systems(
+            Update,
+            |cursor: Res<WindowedCursor>, mut seen: ResMut<SeenInUpdate>| {
+                seen.0 = *cursor;
+            },
+        );
+        frames(&mut app, 1);
+        assert_eq!(app.world().resource::<SeenInUpdate>().0.0, None);
+    }
+
+    // 8. Inactive camera or camera targeting a non-primary window clears the cursor.
+    {
+        let mut app = hovered_ui_app();
+        app.world_mut()
+            .query::<&mut Camera>()
+            .single_mut(app.world_mut())
+            .expect("one camera")
+            .is_active = false;
+        frames(&mut app, 1);
+        assert_eq!(app.world().resource::<WindowedCursor>().0, None);
+    }
+    {
+        let mut app = hovered_ui_app();
+        let other = app.world_mut().spawn(Window::default()).id();
+        *app.world_mut()
+            .query_filtered::<&mut RenderTarget, With<Camera>>()
+            .single_mut(app.world_mut())
+            .expect("one camera") = RenderTarget::Window(WindowRef::Entity(other));
+        frames(&mut app, 1);
+        assert_eq!(app.world().resource::<WindowedCursor>().0, None);
+    }
+
+    // 9. A singular `UiGlobalTransform` (determinant 0) clears to `None` without panicking.
+    {
+        let mut app = hovered_ui_app();
+        app.world_mut()
+            .query_filtered::<&mut UiTransform, With<ImageNode>>()
+            .single_mut(app.world_mut())
+            .expect("view transform")
+            .scale = Vec2::ZERO;
+        frames(&mut app, 2);
+        assert_eq!(app.world().resource::<WindowedCursor>().0, None);
+    }
+}
+
+#[test]
+fn windowed_systems_orders_after_input_without_ambiguities() {
+    #[derive(Resource, Default)]
+    struct Observed {
+        cursor: WindowedCursor,
+        left_just_pressed: bool,
+    }
+
+    let mut app = ui_app();
+    app.edit_schedule(PreUpdate, |schedule| {
+        schedule.set_build_settings(ScheduleBuildSettings {
+            ambiguity_detection: LogLevel::Error,
+            ..default()
+        });
+    });
+    app.init_resource::<Observed>().add_systems(
+        PreUpdate,
+        (
+            || {},
+            (|cursor: Res<WindowedCursor>,
+              buttons: Res<ButtonInput<MouseButton>>,
+              mut observed: ResMut<Observed>| {
+                observed.cursor = *cursor;
+                observed.left_just_pressed = buttons.just_pressed(MouseButton::Left);
+            })
+            .after(WindowedSystems),
+        ),
+    );
+
+    frames(&mut app, 4);
+    let grid = ready(&mut app).grid();
+    let rect = view_rect(&mut app);
+    assert_eq!(
+        cell_at(
+            &mut app,
+            Some((f64::from(rect.min.x), f64::from(rect.min.y)))
+        ),
+        Some((0, 0))
+    );
+
+    // Move cursor to the last cell AND send a left-button press in the same frame; a `PreUpdate`
+    // consumer ordered `.after(WindowedSystems)` must see both updates immediately.
+    let primary = app
+        .world_mut()
+        .query_filtered::<Entity, With<PrimaryWindow>>()
+        .single(app.world())
+        .expect("primary window");
+    app.world_mut().write_message(MouseButtonInput {
+        button: MouseButton::Left,
+        state: ButtonState::Pressed,
+        window: primary,
+    });
+    let last = (grid.width - 1, grid.height - 1);
+    assert_eq!(
+        cell_at(
+            &mut app,
+            Some((f64::from(rect.max.x) - 0.5, f64::from(rect.max.y) - 0.5))
+        ),
+        Some(last)
+    );
+
+    let observed = app.world().resource::<Observed>();
+    assert_eq!(observed.cursor.0.map(|pos| (pos.x, pos.y)), Some(last));
+    assert!(observed.left_just_pressed);
 }
