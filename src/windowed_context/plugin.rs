@@ -290,10 +290,10 @@ fn track_cursor(
             return None;
         }
 
-        // Solve the 2×2 inverse in `f64` directly (forming adjugate numerators before dividing
-        // by the determinant): avoids both Bevy 0.20's eager `UiGlobalTransform::try_inverse`
-        // (which can panic under `glam_assert` and accepts non-finite determinants) and
-        // reciprocal-rounding drift on scaled cell boundaries.
+        // Combine the 2×2 `UiGlobalTransform` inverse and grid mapping into a single `f64`
+        // division: avoids Bevy 0.20's eager `UiGlobalTransform::try_inverse` (which can panic
+        // under `glam_assert` and accepts non-finite determinants) and prevents intermediate
+        // rounding drift on scaled cell boundaries (e.g. `scale.x = 1.5`, 60 cols in 400 px).
         let m = view.transform.matrix2;
         let (a, b, c, d) = (
             f64::from(m.x_axis.x),
@@ -306,10 +306,7 @@ fn track_cursor(
             return None;
         }
         let delta = viewport_pos.as_dvec2() - view.transform.translation.as_dvec2();
-        let local = DVec2::new(d * delta.x - b * delta.y, a * delta.y - c * delta.x) / det;
-        if !local.is_finite() {
-            return None;
-        }
+        let adj = DVec2::new(d * delta.x - b * delta.y, a * delta.y - c * delta.x);
 
         let content = view.computed.content_box();
         let min = content.min.as_dvec2();
@@ -318,15 +315,20 @@ fn track_cursor(
         if !extent.is_finite() || !extent.cmpgt(DVec2::ZERO).all() {
             return None;
         }
-        let rel = local - min;
-        if !rel.cmpge(DVec2::ZERO).all() || !rel.cmplt(extent).all() {
+        let offset = (adj - min * det) * det.signum();
+        let span = extent * det.abs();
+        if !offset.is_finite()
+            || !span.is_finite()
+            || !span.cmpgt(DVec2::ZERO).all()
+            || !offset.cmpge(DVec2::ZERO).all()
+            || !offset.cmplt(span).all()
+        {
             return None;
         }
 
-        // Multiply before dividing so exact internal cell boundaries (e.g. `341 * 58 / 638`)
-        // do not drift below the integer column/row.
+        // Multiply before dividing so exact internal cell boundaries stay exact.
         let dimensions = DVec2::new(f64::from(grid.width), f64::from(grid.height));
-        let cell = (rel * dimensions) / extent;
+        let cell = (offset * dimensions) / span;
         (cell.cmpge(DVec2::ZERO).all() && cell.cmplt(dimensions).all())
             .then(|| Position::new(cell.x as u16, cell.y as u16))
     };

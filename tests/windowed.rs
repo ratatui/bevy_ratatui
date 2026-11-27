@@ -859,6 +859,50 @@ fn cursor_follows_laid_out_view_under_rounding_scaling_viewport_and_clip() {
         .scale = Vec2::ONE;
     frames(&mut app, 2);
 
+    // Non-representable local seam on an integer screen pixel: 60 columns in a 400 px content
+    // box centered at x = 300 with `scale.x = 1.5` spans 600 px so column 1 starts at x = 10.
+    // Dividing by `det` before subtracting `min` would drift to `0.9999999999999986` (col 0).
+    window(&mut app, |window| {
+        window.resolution.set_physical_resolution(600, 400);
+    });
+    configure(&mut app, |config| {
+        config.sizing = TerminalSizing::Fixed {
+            font_size: 16.0,
+            cell_size: Vec2::new(10.0, 20.0),
+        };
+    });
+    {
+        let (mut node, mut transform) = app
+            .world_mut()
+            .query_filtered::<(&mut Node, &mut UiTransform), With<ImageNode>>()
+            .single_mut(app.world_mut())
+            .expect("view node and transform");
+        node.max_width = px(400.0);
+        transform.scale = Vec2::new(1.5, 1.0);
+    }
+    frames(&mut app, 4);
+    assert_eq!(ready(&mut app).grid().width, 60);
+    assert_eq!(
+        cell_at(&mut app, Some((f64::from(10.0_f32.next_down()), 200.0))).map(|(col, _)| col),
+        Some(0),
+        "just left of scaled column 1 seam"
+    );
+    assert_eq!(
+        cell_at(&mut app, Some((10.0, 200.0))).map(|(col, _)| col),
+        Some(1),
+        "exact scaled column 1 seam at x = 10"
+    );
+    {
+        let (mut node, mut transform) = app
+            .world_mut()
+            .query_filtered::<(&mut Node, &mut UiTransform), With<ImageNode>>()
+            .single_mut(app.world_mut())
+            .expect("view node and transform");
+        node.max_width = Val::Auto;
+        transform.scale = Vec2::ONE;
+    }
+    frames(&mut app, 2);
+
     // Non-identity invertible `UiTransform` (translation) shifts the hit-test target with layout.
     let before_shift = view_rect(&mut app);
     {
@@ -1198,6 +1242,7 @@ fn stale_cursor_is_cleared_and_change_detection_stays_quiet() {
         // `Camera::physical_viewport_rect()` which overflows `u32`.
         app.configure_sets(PreUpdate, UiSystems::Focus.run_if(|| false));
         frames(&mut app, 1);
+        assert!(app.world().resource::<WindowedCursor>().0.is_some());
     }
 
     // 11. A singular `UiGlobalTransform` (determinant 0) clears to `None` without panicking
