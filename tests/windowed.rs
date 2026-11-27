@@ -10,7 +10,7 @@ use bevy::{
     mesh::MeshPlugin,
     prelude::*,
     text::{DEFAULT_FONT_DATA, TextPlugin},
-    ui::UiPlugin,
+    ui::{UiPlugin, UiSystems},
     window::{PrimaryWindow, WindowRef},
 };
 use bevy_ratatui::{ContextSystems, RatatuiContext, RatatuiPlugins, windowed::*};
@@ -511,6 +511,17 @@ fn an_inactive_camera_does_not_stand_in_for_one_that_draws() {
     // The terminal is shown by the camera spawned for it, whichever Bevy UI would pick.
     let (.., camera) = view(&mut app);
     assert!(camera.is_some_and(|camera| camera != inactive));
+
+    // A bare `Camera` without `Camera2d` or `Camera3d` is not a UI camera, so `setup` spawns a
+    // `Camera2d` and binds the view to it.
+    let mut bare = self::app();
+    let bare_cam = bare
+        .world_mut()
+        .spawn((Camera::default(), RenderTarget::default()))
+        .id();
+    frames(&mut bare, 2);
+    assert_eq!(cameras(&mut bare).len(), 2);
+    assert!(view(&mut bare).2.is_some_and(|camera| camera != bare_cam));
 }
 
 #[test]
@@ -605,6 +616,7 @@ fn ui_app() -> App {
 }
 
 /// The laid-out physical rectangle of `TerminalView` in camera viewport coordinates.
+/// Assumes an axis-aligned transform (translation and positive scale only).
 fn view_rect(app: &mut App) -> Rect {
     let (computed, transform) = app
         .world_mut()
@@ -814,6 +826,39 @@ fn cursor_follows_laid_out_view_under_rounding_scaling_viewport_and_clip() {
         "exact internal seam at column 31"
     );
 
+    // Scaled exact internal cell seam: 560px content box (70 cols of 8×20) centered at x = 280
+    // with `scale.x = 91 / 64`. Column 11 starts at local x = -192, which transforms to viewport
+    // x = 7 exactly; solving the 2×2 inverse before dividing by det keeps column 11 exact.
+    window(&mut app, |window| {
+        window.resolution.set_physical_resolution(560, 400);
+    });
+    configure(&mut app, |config| {
+        config.sizing = TerminalSizing::Fixed {
+            font_size: 16.0,
+            cell_size: Vec2::new(8.0, 20.0),
+        };
+    });
+    app.world_mut()
+        .query_filtered::<&mut UiTransform, With<ImageNode>>()
+        .single_mut(app.world_mut())
+        .expect("view transform")
+        .scale = Vec2::new(91.0 / 64.0, 1.0);
+    frames(&mut app, 4);
+    let scaled_seam = ready(&mut app);
+    assert_eq!(scaled_seam.grid().width, 70);
+    assert_eq!(scaled_seam.size().x, 560);
+    assert_eq!(
+        cell_at(&mut app, Some((7.0, 200.0))).map(|(col, _)| col),
+        Some(11),
+        "exact scaled internal seam at column 11"
+    );
+    app.world_mut()
+        .query_filtered::<&mut UiTransform, With<ImageNode>>()
+        .single_mut(app.world_mut())
+        .expect("view transform")
+        .scale = Vec2::ONE;
+    frames(&mut app, 2);
+
     // Non-identity invertible `UiTransform` (translation) shifts the hit-test target with layout.
     let before_shift = view_rect(&mut app);
     {
@@ -898,25 +943,50 @@ fn cursor_follows_laid_out_view_under_rounding_scaling_viewport_and_clip() {
     );
 
     // A clipping ancestor (`Overflow::clip()`) populates `CalculatedClip` via Bevy's UI layout:
-    // pixels inside the clip box hit, while pixels outside the clip box return `None`.
+    // keep the child unshrunk (`flex_shrink = 0.0`) so it genuinely overflows the 200px ancestor,
+    // then verify the *same* pixel hits under `Overflow::visible()` and clears under `Overflow::clip()`.
     let view_entity = app
         .world_mut()
         .query_filtered::<Entity, With<ImageNode>>()
         .single(app.world())
         .expect("one view");
+    app.world_mut()
+        .entity_mut(view_entity)
+        .get_mut::<Node>()
+        .expect("view node")
+        .flex_shrink = 0.0;
     let clipper = app
         .world_mut()
         .spawn(Node {
             width: px(200.0),
             height: px(vp_size.y as f32),
-            overflow: Overflow::clip(),
+            overflow: Overflow::visible(),
             ..default()
         })
         .id();
     app.world_mut().entity_mut(clipper).add_child(view_entity);
     frames(&mut app, 2);
+    let unclipped_rect = view_rect(&mut app);
+    assert!(
+        unclipped_rect.max.x > 250.0,
+        "child view must overflow 200px ancestor: {unclipped_rect:?}"
+    );
     let inside_clip = vp_pos.as_vec2() + Vec2::new(100.0, 100.0);
-    let outside_clip = vp_pos.as_vec2() + Vec2::new(250.0, 100.0);
+    let probe_past_200 = vp_pos.as_vec2() + Vec2::new(250.0, 100.0);
+    assert!(
+        cell_at(
+            &mut app,
+            Some((f64::from(probe_past_200.x), f64::from(probe_past_200.y)))
+        )
+        .is_some(),
+        "same pixel hits when ancestor uses Overflow::visible()"
+    );
+    app.world_mut()
+        .entity_mut(clipper)
+        .get_mut::<Node>()
+        .expect("clipper node")
+        .overflow = Overflow::clip();
+    frames(&mut app, 2);
     assert!(
         cell_at(
             &mut app,
@@ -928,10 +998,10 @@ fn cursor_follows_laid_out_view_under_rounding_scaling_viewport_and_clip() {
     assert_eq!(
         cell_at(
             &mut app,
-            Some((f64::from(outside_clip.x), f64::from(outside_clip.y)))
+            Some((f64::from(probe_past_200.x), f64::from(probe_past_200.y)))
         ),
         None,
-        "clipped out"
+        "same pixel cleared once ancestor uses Overflow::clip()"
     );
 }
 
@@ -1065,7 +1135,20 @@ fn stale_cursor_is_cleared_and_change_detection_stays_quiet() {
         assert_eq!(app.world().resource::<SeenInUpdate>().0.0, None);
     }
 
-    // 8. Inactive camera or camera targeting a non-primary window clears the cursor.
+    // 8. Fully transparent image tint clears the cursor (Bevy skips drawing transparent images).
+    {
+        let mut app = hovered_ui_app();
+        app.world_mut()
+            .query::<&mut ImageNode>()
+            .single_mut(app.world_mut())
+            .expect("one view")
+            .color = Color::NONE;
+        frames(&mut app, 1);
+        assert_eq!(app.world().resource::<WindowedCursor>().0, None);
+    }
+
+    // 9. Inactive camera, non-2D/3D bare camera, or camera targeting a non-primary window clears
+    //    the cursor.
     {
         let mut app = hovered_ui_app();
         app.world_mut()
@@ -1073,6 +1156,17 @@ fn stale_cursor_is_cleared_and_change_detection_stays_quiet() {
             .single_mut(app.world_mut())
             .expect("one camera")
             .is_active = false;
+        frames(&mut app, 1);
+        assert_eq!(app.world().resource::<WindowedCursor>().0, None);
+    }
+    {
+        let mut app = hovered_ui_app();
+        let cam_entity = app
+            .world_mut()
+            .query_filtered::<Entity, With<Camera>>()
+            .single(app.world())
+            .expect("one camera");
+        app.world_mut().entity_mut(cam_entity).remove::<Camera2d>();
         frames(&mut app, 1);
         assert_eq!(app.world().resource::<WindowedCursor>().0, None);
     }
@@ -1087,9 +1181,31 @@ fn stale_cursor_is_cleared_and_change_detection_stays_quiet() {
         assert_eq!(app.world().resource::<WindowedCursor>().0, None);
     }
 
-    // 9. A singular `UiGlobalTransform` (determinant 0) clears to `None` without panicking.
+    // 10. A custom viewport whose `physical_position + physical_size` would overflow `u32` does
+    //     not panic.
     {
         let mut app = hovered_ui_app();
+        app.world_mut()
+            .query::<&mut Camera>()
+            .single_mut(app.world_mut())
+            .expect("one camera")
+            .viewport = Some(Viewport {
+            physical_position: UVec2::new(1, 0),
+            physical_size: UVec2::new(u32::MAX, 400),
+            ..default()
+        });
+        // Disable `UiSystems::Focus` here because Bevy's own focus system calls
+        // `Camera::physical_viewport_rect()` which overflows `u32`.
+        app.configure_sets(PreUpdate, UiSystems::Focus.run_if(|| false));
+        frames(&mut app, 1);
+    }
+
+    // 11. A singular `UiGlobalTransform` (determinant 0) clears to `None` without panicking
+    //     (even under `bevy/glam_assert`, with `UiSystems::Focus` disabled so Bevy's own
+    //     `UiGlobalTransform::try_inverse` does not intercept the test).
+    {
+        let mut app = hovered_ui_app();
+        app.configure_sets(PreUpdate, UiSystems::Focus.run_if(|| false));
         app.world_mut()
             .query_filtered::<&mut UiTransform, With<ImageNode>>()
             .single_mut(app.world_mut())
@@ -1115,10 +1231,14 @@ fn windowed_systems_orders_after_input_without_ambiguities() {
             ..default()
         });
     });
+    // Include a `&mut Window` system after `UiSystems::Focus` (matching `bevy_ui_widgets`'s
+    // IME toggle system in `DefaultPlugins`) to verify `WindowedSystems.before(UiSystems::Focus)`
+    // stays ambiguity-free.
     app.init_resource::<Observed>().add_systems(
         PreUpdate,
         (
             || {},
+            (|_windows: Query<&mut Window, With<PrimaryWindow>>| {}).after(UiSystems::Focus),
             (|cursor: Res<WindowedCursor>,
               buttons: Res<ButtonInput<MouseButton>>,
               mut observed: ResMut<Observed>| {
