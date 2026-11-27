@@ -133,8 +133,8 @@ fn main() -> AppExit {
         ))
         .init_resource::<DemoState>()
         .insert_resource(showcase())
-        // `RatatuiContext` is inserted during `Startup`, so configure initial fonts in `PostStartup`.
-        .add_systems(PostStartup, setup_fonts)
+        // `RatatuiContext` is created in `PreStartup`, so `Startup` can configure it directly.
+        .add_systems(Startup, setup_fonts)
         .add_systems(Update, (handle_input, draw_showcase).chain())
         .run()
 }

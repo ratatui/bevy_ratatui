@@ -48,8 +48,15 @@
 //!
 //! # Input Forwarding
 //!
-//! The terminal input can be forwarded to the bevy input system. See the
-//! [`translation`] module documentation for details.
+//! The terminal input can be forwarded to the bevy input system.
+#![cfg_attr(
+    all(feature = "crossterm", feature = "keyboard"),
+    doc = "See the [`translation`] module documentation for details."
+)]
+#![cfg_attr(
+    not(all(feature = "crossterm", feature = "keyboard")),
+    doc = "See the `translation` module documentation (requires the `crossterm` and `keyboard` features) for details."
+)]
 //!
 //! [Bevy]: https://bevyengine.org
 //! [Ratatui]: https://ratatui.rs
@@ -62,7 +69,7 @@ mod ratatui_plugin;
 mod windowed_context;
 
 pub use context::DefaultContext as RatatuiContext;
-pub use ratatui_plugin::RatatuiPlugins;
+pub use ratatui_plugin::{ContextSystems, RatatuiPlugins};
 
 #[cfg(feature = "crossterm")]
 pub use ratatui::crossterm;
@@ -70,7 +77,7 @@ pub use ratatui::crossterm;
 pub mod context {
     #[cfg(feature = "crossterm")]
     pub use super::crossterm_context::context::CrosstermContext;
-    pub use super::ratatui_plugin::ContextPlugin;
+    pub use super::ratatui_plugin::{ContextPlugin, ContextSystems};
     #[cfg(feature = "windowed")]
     pub use super::windowed_context::context::WindowedContext;
     #[cfg(all(feature = "crossterm", not(feature = "windowed")))]
@@ -98,16 +105,20 @@ pub mod translation {}
 ///
 /// The context is a resource that also carries the renderer's components. Set fonts, sizing,
 /// theme and cursor on its [`TerminalRenderConfig`](windowed::TerminalRenderConfig) in
-/// `PostStartup` (the context is inserted in `Startup`) or at any time after, and read what was
+/// `Startup` (the context is created in `PreStartup`) or at any time after, and read what was
 /// drawn from its [`TerminalTexture`](windowed::TerminalTexture):
 ///
 /// ```no_run
 /// use bevy::prelude::*;
-/// use bevy_ratatui::{RatatuiContext, windowed::*};
+/// use bevy_ratatui::{RatatuiContext, RatatuiPlugins, windowed::*};
 ///
 /// fn larger_text(mut config: Single<&mut TerminalRenderConfig, With<RatatuiContext>>) {
 ///     config.sizing = TerminalSizing::font(24.0);
 /// }
+///
+/// App::new()
+///     .add_plugins((DefaultPlugins, RatatuiPlugins::default()))
+///     .add_systems(Startup, larger_text);
 /// ```
 #[cfg(feature = "windowed")]
 pub mod windowed {

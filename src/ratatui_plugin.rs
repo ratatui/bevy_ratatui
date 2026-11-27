@@ -12,6 +12,14 @@ use crate::RatatuiContext;
 ///
 /// App::new().add_plugins(RatatuiPlugins::default());
 /// ```
+///
+/// [`ContextPlugin`] creates the context in `PreStartup`, in [`ContextSystems`], so after
+/// successful setup and `PreStartup`'s deferred flush it is ready for ordinary `Startup` systems
+/// (see [`ContextSystems`] for the full contract). A [`RatatuiContext`] inserted after adding the
+/// plugins and before [`ContextSystems`] is kept. In terminal (non-`windowed`) builds, Kitty and
+/// mouse modes apply only to a context [`ContextPlugin`] creates, while input forwarding (if
+/// enabled) still requests focus reporting in `PostStartup` and the context is still removed on
+/// [`AppExit`].
 pub struct RatatuiPlugins {
     /// Use kitty protocol if available and enabled.
     pub enable_kitty_protocol: bool,
@@ -54,8 +62,37 @@ impl PluginGroup for RatatuiPlugins {
     }
 }
 
-/// Initializes the selected terminal backend during startup, and removes the
-/// context on [`AppExit`] in terminal (crossterm) mode.
+/// System set for [`ContextPlugin`]'s terminal context setup, running in `PreStartup`.
+///
+/// [`ContextPlugin`] checks for an existing [`RatatuiContext`] in the world and inserts a new one
+/// via `Commands`. By default `PreStartup` flushes deferred commands at the end of the schedule
+/// (`Schedule::set_apply_final_deferred(true)`), so once `PreStartup` completes after successful
+/// setup, `Res<RatatuiContext>` is available to ordinary `Startup` systems without extra ordering.
+/// In windowed mode, `TerminalRenderConfig` is available whenever `WindowedPlugin` was added
+/// before insertion, and `TerminalTexture` is available whenever `Assets<Image>` (e.g. via
+/// `DefaultPlugins`, or `AssetPlugin` with `ImagePlugin` / `App::init_asset::<Image>`) also
+/// existed at insertion time.
+///
+/// To supply a pre-created [`RatatuiContext`], ensure it is visible in the world before
+/// `ContextSystems` runs: insert it after adding the plugins with `App::insert_resource`, or from
+/// a `PreStartup` system ordered `.before(ContextSystems)`. Unordered `Commands` insertions in
+/// `PreStartup` are not guaranteed to precede setup. With `auto_insert_apply_deferred = false`, a
+/// `Commands` producer `.before(ContextSystems)` requires an explicit [`ApplyDeferred`] before
+/// setup (or direct `&mut World` insertion), and a reader `.after(ContextSystems)` inside
+/// `PreStartup` requires an explicit [`ApplyDeferred`] after setup to observe a context created
+/// by [`ContextPlugin`].
+///
+/// Initial `bevy_state` `OnEnter` transitions run in `StateTransition` before `PreStartup`;
+/// insert a context before `App::run` if an initial `OnEnter` system needs it.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ContextSystems;
+
+/// Initializes the selected terminal backend in `PreStartup` (in [`ContextSystems`]), and removes
+/// the context on [`AppExit`] in terminal (crossterm) mode.
+///
+/// If a [`RatatuiContext`] already exists when [`ContextSystems`] runs, the plugin keeps it; in
+/// terminal (non-`windowed`) builds, `enable_kitty_protocol` and `enable_mouse_capture` apply
+/// only to a context it creates.
 pub struct ContextPlugin {
     /// Enable the Kitty keyboard protocol when supported by the terminal.
     pub enable_kitty_protocol: bool,
@@ -79,25 +116,86 @@ impl Plugin for ContextPlugin {
         #[cfg(all(not(feature = "windowed"), feature = "mouse"))]
         let mouse = self.enable_mouse_capture;
 
-        app.add_systems(Startup, move |mut commands: Commands| -> Result {
-            let context = RatatuiContext::init()?;
-            #[cfg(not(feature = "windowed"))]
-            if kitty {
-                let _ = context.enable_kitty_protocol();
-            }
-            #[cfg(all(not(feature = "windowed"), feature = "mouse"))]
-            if mouse {
-                context.enable_mouse_capture()?;
-            }
-            commands.insert_resource(context);
-            Ok(())
-        });
+        app.add_systems(
+            PreStartup,
+            (move |mut commands: Commands, existing: Option<Res<RatatuiContext>>| -> Result {
+                if existing.is_some() {
+                    return Ok(());
+                }
+                let context = RatatuiContext::init()?;
+                #[cfg(not(feature = "windowed"))]
+                if kitty {
+                    let _ = context.enable_kitty_protocol();
+                }
+                #[cfg(all(not(feature = "windowed"), feature = "mouse"))]
+                if mouse {
+                    context.enable_mouse_capture()?;
+                }
+                commands.insert_resource(context);
+                Ok(())
+            })
+            .in_set(ContextSystems),
+        );
 
         #[cfg(not(feature = "windowed"))]
         app.add_systems(
             Last,
             (|mut commands: Commands| commands.remove_resource::<RatatuiContext>())
                 .run_if(on_message::<AppExit>),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::ecs::schedule::{LogLevel, ScheduleBuildSettings};
+
+    use super::*;
+
+    #[derive(Default, Resource)]
+    struct Order(Vec<&'static str>);
+
+    fn record(label: &'static str) -> impl FnMut(ResMut<Order>) {
+        move |mut order| order.0.push(label)
+    }
+
+    #[test]
+    fn context_plugin_schedules_in_pre_startup_without_ambiguities() {
+        let mut app = App::new();
+        app.add_plugins(ContextPlugin::default())
+            // Keep the test headless: never open a real terminal.
+            .configure_sets(PreStartup, ContextSystems.run_if(|| false));
+
+        let settings = ScheduleBuildSettings {
+            ambiguity_detection: LogLevel::Error,
+            ..default()
+        };
+        app.edit_schedule(PreStartup, |s| {
+            s.set_build_settings(settings.clone());
+        });
+        app.edit_schedule(Startup, |s| {
+            s.set_build_settings(settings.clone());
+        });
+
+        // Register reverse-ordered PreStartup hooks, unrelated systems in both schedules,
+        // and a plain Startup consumer.
+        app.init_resource::<Order>()
+            .add_systems(
+                PreStartup,
+                (
+                    record("after").after(ContextSystems),
+                    record("before").before(ContextSystems),
+                    || {},
+                ),
+            )
+            .add_systems(Startup, (record("startup"), || {}));
+
+        app.update();
+
+        assert!(app.world().get_resource::<RatatuiContext>().is_none());
+        assert_eq!(
+            app.world().resource::<Order>().0,
+            ["before", "after", "startup"]
         );
     }
 }
