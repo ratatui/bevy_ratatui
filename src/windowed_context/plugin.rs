@@ -1,5 +1,8 @@
 use bevy::{
     camera::RenderTarget,
+    ecs::query::QueryData,
+    input::InputSystems,
+    math::DVec2,
     prelude::*,
     ui::{DefaultUiCamera, UiSystems},
     window::{PrimaryWindow, WindowRef},
@@ -32,11 +35,41 @@ use crate::RatatuiContext;
 /// [`ContextSystems`](crate::ContextSystems) (see [`ContextSystems`](crate::ContextSystems) for
 /// deferred command flushing requirements).
 ///
+/// Camera selection runs once on the first `PreUpdate`: if Bevy UI's default camera is already
+/// an active [`Camera2d`] or [`Camera3d`] on the primary window, the view is left to it (so later
+/// changes to [`IsDefaultUiCamera`] can still redirect the view); otherwise the view is bound
+/// once via [`UiTargetCamera`] to another active primary-window 2D/3D camera or to a [`Camera2d`]
+/// spawned for it.
+///
+/// `bevy_terminal` reads the grid in `PostUpdate` ([`TerminalSystems::Sync`]), so draw in
+/// `Update` (or in `PostUpdate` ordered `.before(TerminalSystems::Sync)`). Drawing in `Last`
+/// shows one frame late.
+///
 /// For mouse input, [`WindowedCursor`] is the cell under the cursor.
 pub struct WindowedPlugin;
 
-/// The terminal cell under the mouse cursor, updated in `PreUpdate`: `None` while the cursor is
-/// outside the primary window or the terminal shown in it, or the terminal is not drawn.
+/// System set for [`WindowedPlugin`]'s per-frame `PreUpdate` systems (window scaling, grid
+/// fitting, and [`WindowedCursor`] tracking; one-shot view/camera setup runs outside the set).
+///
+/// Ordered after Bevy's [`InputSystems`](bevy::input::InputSystems) and before
+/// [`UiSystems::Focus`](bevy::ui::UiSystems::Focus) in `PreUpdate`, so a `PreUpdate` system
+/// ordered `.after(WindowedSystems)` observes both fresh Bevy mouse/keyboard input and this
+/// frame's [`WindowedCursor`] (and resized [`RatatuiContext`]).
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WindowedSystems;
+
+/// The terminal cell under the mouse cursor, updated in `PreUpdate` in [`WindowedSystems`]
+/// (after Bevy's [`InputSystems`](bevy::input::InputSystems)) from the current pointer position
+/// against the last completed UI layout and measured grid.
+///
+/// It is `None` before UI layout has run, while there is no unique primary window, while the
+/// terminal view is hidden, transparent, not drawn, or showing another image, when its camera is
+/// missing, inactive, not a 2D/3D UI camera, or not targeting the primary window, or while the
+/// cursor is outside the visible terminal. It does not check occlusion by other UI nodes and
+/// assumes the plugin-managed view keeps its default image box and orientation.
+///
+/// Order `PreUpdate` consumers `.after(WindowedSystems)` to observe both fresh Bevy input and
+/// this frame's cursor position.
 ///
 /// Windowed mode has no mouse messages of its own. Read this with Bevy's
 /// `ButtonInput<MouseButton>` and `MouseWheel` to know which cell a click or a scroll is over.
@@ -47,12 +80,16 @@ impl Plugin for WindowedPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(RatatuiSourcePlugin::<RatatuiContext>::default())
             .init_resource::<WindowedCursor>()
+            .configure_sets(
+                PreUpdate,
+                WindowedSystems.after(InputSystems).before(UiSystems::Focus),
+            )
             // After every startup schedule, so a camera spawned in any of them is seen.
             .add_systems(PreUpdate, setup.run_if(run_once))
             // Before any `Update` system draws, so a resize never clears a frame already drawn.
             .add_systems(
                 PreUpdate,
-                (follow_window_scale, fit_to_window, track_cursor),
+                (follow_window_scale, fit_to_window, track_cursor).in_set(WindowedSystems),
             )
             .add_systems(
                 PostUpdate,
@@ -81,23 +118,29 @@ impl RatatuiSource for RatatuiContext {
 #[derive(Component)]
 struct TerminalView;
 
+/// Bevy UI renders only to `Camera2d` and `Camera3d` cameras.
+type UiCameraFilter = Or<(With<Camera2d>, With<Camera3d>)>;
+
 /// Spawns the UI node showing the terminal, and a 2D camera unless the primary window has an
-/// active one.
+/// active 2D/3D camera.
 ///
 /// Bevy UI draws a node to its default camera: the one marked `IsDefaultUiCamera`, or the
-/// highest-order one on the primary window. Where that is an active camera on the primary window
-/// the node is left to it. Where it is not (it is inactive, or marked on another window or an
-/// image) the node is bound to another active camera on the primary window, or to the one
-/// spawned here.
+/// highest-order one on the primary window. Where that is an active 2D/3D camera on the primary
+/// window the node is left to it. Where it is not (it is inactive, not a `Camera2d`/`Camera3d`,
+/// or marked on another window or an image) the node is bound to another active 2D/3D camera on
+/// the primary window, or to the one spawned here.
 fn setup(
     mut commands: Commands,
     ui_camera: DefaultUiCamera,
-    cameras: Query<(Entity, &Camera, &RenderTarget)>,
+    cameras: Query<(Entity, &Camera, &RenderTarget), UiCameraFilter>,
     primary_window: Query<(), With<PrimaryWindow>>,
 ) {
     let mut view = commands.spawn((
         TerminalView,
-        ImageNode::default(),
+        ImageNode {
+            image_mode: NodeImageMode::Stretch,
+            ..default()
+        },
         Node {
             justify_self: JustifySelf::Center,
             align_self: AlignSelf::Center,
@@ -179,28 +222,120 @@ fn fit_to_window(
     }
 }
 
-/// Finds the cell under the cursor in the terminal as it was last shown: centered in the window,
-/// one texture pixel to `shown` physical pixels.
+#[derive(QueryData)]
+struct TerminalViewLayout {
+    computed: &'static ComputedNode,
+    transform: &'static UiGlobalTransform,
+    visibility: &'static InheritedVisibility,
+    target_camera: &'static ComputedUiTargetCamera,
+    image: &'static ImageNode,
+    clip: Option<&'static CalculatedClip>,
+}
+
+/// Finds the cell under the cursor in the terminal as it was last laid out by Bevy UI.
+///
+/// Clears [`WindowedCursor`] whenever there is no unique primary window, no measured terminal
+/// texture, or no visible, laid-out view displaying it.
 fn track_cursor(
-    window: Single<&Window, With<PrimaryWindow>>,
-    ui_scale: Option<Res<UiScale>>,
+    window: Option<Single<(Entity, &Window), With<PrimaryWindow>>>,
     texture: Option<Single<&TerminalTexture, With<RatatuiContext>>>,
+    view: Option<Single<TerminalViewLayout, With<TerminalView>>>,
+    cameras: Query<(&Camera, &RenderTarget), UiCameraFilter>,
     mut cursor: ResMut<WindowedCursor>,
 ) {
     let cell = || {
-        let geometry = texture.as_ref()?.measured()?;
-        let position = window.physical_cursor_position()?;
-        // One, unless `bevy_terminal` clamped the scale it rasterizes at.
-        let shown = ui_scale_factor(&window, ui_scale.as_deref()) / geometry.raster_scale();
-        let terminal = geometry.size().as_vec2() * shown;
-        let origin = (window.resolution.physical_size().as_vec2() - terminal) / 2.0;
-        let cell = (position - origin) / (geometry.physical_cell_size() * shown);
-        let grid = geometry.grid();
-        // Converted only once known to be inside the grid, where the casts are exact.
-        let inside = cell.cmpge(Vec2::ZERO).all()
-            && cell.x < f32::from(grid.width)
-            && cell.y < f32::from(grid.height);
-        inside.then(|| Position::new(cell.x as u16, cell.y as u16))
+        let &(window_entity, window) = window.as_deref()?;
+        let texture = texture.as_deref()?;
+        let grid = texture.measured()?.grid();
+        let view = view.as_deref()?;
+
+        // Reject non-finite outer sizes before calling `content_box()`, whose internal
+        // `Rect::from_center_size` asserts non-negative dimensions (which fails on NaN).
+        if !view.visibility.get()
+            || !view.computed.size().is_finite()
+            || view.computed.is_empty()
+            || view.image.image != *texture.image()
+            || view.image.color.is_fully_transparent()
+        {
+            return None;
+        }
+
+        let (camera, target) = cameras.get(view.target_camera.get()?).ok()?;
+        let RenderTarget::Window(target) = target else {
+            return None;
+        };
+        if !camera.is_active
+            || matches!(target, WindowRef::Entity(entity) if *entity != window_entity)
+        {
+            return None;
+        }
+
+        // Require target info to exist (matching Bevy's UI renderer) and read origin/size
+        // separately instead of `physical_viewport_rect()`, whose `min + size` can overflow `u32`.
+        let target_size = camera.physical_target_size()?;
+        let viewport_size = camera.physical_viewport_size()?;
+        if target_size.min_element() == 0 || viewport_size.min_element() == 0 {
+            return None;
+        }
+        let viewport_origin = camera
+            .viewport
+            .as_ref()
+            .map_or(UVec2::ZERO, |v| v.physical_position);
+        let viewport_pos = window.physical_cursor_position()? - viewport_origin.as_vec2();
+        if !viewport_pos.cmpge(Vec2::ZERO).all()
+            || !viewport_pos.cmplt(viewport_size.as_vec2()).all()
+            || view
+                .clip
+                .is_some_and(|clip| !clip.contains_point(viewport_pos))
+        {
+            return None;
+        }
+
+        // Combine the 2×2 `UiGlobalTransform` inverse and grid mapping into a single `f64`
+        // division: avoids Bevy 0.20's eager `UiGlobalTransform::try_inverse` (which can panic
+        // under `glam_assert` and accepts non-finite determinants) and prevents intermediate
+        // rounding drift on scaled cell boundaries (e.g. `scale.x = 1.5`, 60 cols in 400 px).
+        let m = view.transform.matrix2;
+        let (a, b, c, d) = (
+            f64::from(m.x_axis.x),
+            f64::from(m.y_axis.x),
+            f64::from(m.x_axis.y),
+            f64::from(m.y_axis.y),
+        );
+        let det = a * d - b * c;
+        if !det.is_finite() || det == 0.0 {
+            return None;
+        }
+        let delta = viewport_pos.as_dvec2() - view.transform.translation.as_dvec2();
+        let adj = DVec2::new(d * delta.x - b * delta.y, a * delta.y - c * delta.x);
+
+        let content = view.computed.content_box();
+        let min = content.min.as_dvec2();
+        let max = content.max.as_dvec2();
+        let extent = max - min;
+        if !extent.is_finite() || !extent.cmpgt(DVec2::ZERO).all() {
+            return None;
+        }
+        let offset = (adj - min * det) * det.signum();
+        let span = extent * det.abs();
+        if !offset.is_finite()
+            || !span.is_finite()
+            || !span.cmpgt(DVec2::ZERO).all()
+            || !offset.cmpge(DVec2::ZERO).all()
+            || !offset.cmplt(span).all()
+        {
+            return None;
+        }
+
+        // Multiply before dividing so exact internal cell boundaries stay exact, and clamp
+        // sub-ULP rounding at the far edge (`offset < span`) to the last cell.
+        if grid.width == 0 || grid.height == 0 {
+            return None;
+        }
+        let dimensions = DVec2::new(f64::from(grid.width), f64::from(grid.height));
+        let cell = ((offset * dimensions) / span).min(dimensions - DVec2::ONE);
+        (cell.cmpge(DVec2::ZERO).all() && cell.cmplt(dimensions).all())
+            .then(|| Position::new(cell.x as u16, cell.y as u16))
     };
     let cell = WindowedCursor(cell());
     // Compared first, so that systems run on its change only when the cell does.

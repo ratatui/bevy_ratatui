@@ -103,6 +103,10 @@ pub mod translation {}
 /// The windowed backend: the plugin, the backend the context draws into, and the renderer's
 /// configuration and inspection types.
 ///
+/// Draw to the context in `Update`, or in `PostUpdate` before
+/// [`TerminalSystems::Sync`](windowed::TerminalSystems::Sync) (when `bevy_terminal` reads the
+/// grid); drawing in `Last` shows one frame late.
+///
 /// The context is a resource that also carries the renderer's components. Set fonts, sizing,
 /// theme and cursor on its [`TerminalRenderConfig`](windowed::TerminalRenderConfig) in
 /// `Startup` (the context is created in `PreStartup`) or at any time after, and read what was
@@ -122,7 +126,7 @@ pub mod translation {}
 /// ```
 #[cfg(feature = "windowed")]
 pub mod windowed {
-    pub use super::windowed_context::plugin::{WindowedCursor, WindowedPlugin};
+    pub use super::windowed_context::plugin::{WindowedCursor, WindowedPlugin, WindowedSystems};
     /// The backend the windowed context draws into.
     pub use bevy_terminal_ratatui::RatatuiBackend;
     /// Renderer configuration and inspection types for the windowed terminal.
