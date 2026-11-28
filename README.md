@@ -86,7 +86,8 @@ a small `FramePass` resource the systems share. It keeps four rules:
 4. A system that wants the cursor stores its position in the resource, and the
    presenting system passes `pass.cursor.take()` to `apply_buffer_with_cursor`,
    so the cursor hides again on frames that set none.
-   `get_frame().set_cursor_position(..)` does nothing outside `draw`.
+   `get_frame().set_cursor_position(..)` does nothing outside `draw` /
+   `try_draw`.
 
 ## demo
 

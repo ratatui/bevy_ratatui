@@ -24,8 +24,8 @@
 //! 3. Redraw everything: on a frame that presents, every contributor must render. Whatever is
 //!    left unpainted is blank in the new frame.
 //! 4. Pass the cursor through the resource. `get_frame().set_cursor_position(..)` is silently
-//!    dropped because only `draw` reads the position a `Frame` records. Presenting with `None`
-//!    hides the cursor, so it disappears on a frame in which nobody asks for it.
+//!    dropped because only `draw` / `try_draw` reads the position a `Frame` records. Presenting
+//!    with `None` hides the cursor, so it disappears on a frame in which nobody asks for it.
 //!
 //! The same code runs in a terminal and, with the `windowed` feature, in a window.
 //!
@@ -333,7 +333,12 @@ impl Ui {
     fn apply(&mut self, action: Action) {
         match action {
             Action::Previous => self.selected = self.selected.saturating_sub(1),
-            Action::Next => self.selected = (self.selected + 1).min(NOTES.len().saturating_sub(1)),
+            Action::Next => {
+                self.selected = self
+                    .selected
+                    .saturating_add(1)
+                    .min(NOTES.len().saturating_sub(1));
+            }
             Action::Left => self.column = self.column.saturating_sub(1),
             Action::Right => self.column = self.column.saturating_add(1),
             Action::ToggleCursor => self.cursor = !self.cursor,
@@ -404,13 +409,13 @@ mod tests {
 
     use super::*;
 
-    /// Text only the sidebar draws, and text only the editor draws.
+    /// Text drawn by the sidebar, editor, and footer.
     const SIDEBAR: &str = " Notes ";
     const EDITOR: &str = "Tea, oat milk, two lemons.";
     const FOOTER: &str = "Up/Down note";
 
-    /// One frame of the pattern on any backend: the contributors in the order of
-    /// [`DrawSystems`], then [`present`].
+    /// Mirrors [`DrawSystems`] plus [`present_frame`] on any backend, so `TestBackend` tests run
+    /// the example's own render and pass helpers without opening stdout.
     fn frame<B: Backend>(
         terminal: &mut Terminal<B>,
         pass: &mut FramePass,
@@ -511,6 +516,20 @@ mod tests {
         render_sidebar(&ui, &mut ListState::default(), panes.sidebar, &mut expected);
         render_editor(&ui, panes.editor, &mut expected);
         assert_eq!(terminal.backend().buffer(), &expected);
+
+        // Degenerate editor panes hide or clamp the cursor inside the border instead of placing
+        // it out of bounds.
+        let tiny = Rect::new(0, 0, 2, 2);
+        assert_eq!(render_editor(&ui, tiny, &mut Buffer::empty(tiny)), None);
+        let moved = Ui {
+            column: 10,
+            ..Ui::default()
+        };
+        let narrow = Rect::new(0, 0, 4, 3);
+        assert_eq!(
+            render_editor(&moved, narrow, &mut Buffer::empty(narrow)),
+            Some(Position::new(2, 1))
+        );
         Ok(())
     }
 

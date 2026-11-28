@@ -117,9 +117,14 @@
 //!
 //! fn draw_prompt(mut context: ResMut<RatatuiContext>, mut pass: ResMut<FramePass>) -> Result {
 //!     let area = begin_frame(&mut context, &mut pass)?;
+//!     if area.height == 0 {
+//!         return Ok(());
+//!     }
 //!     let row = Rect { y: area.bottom().saturating_sub(1), height: 1, ..area };
 //!     Line::from("> ").render(row, context.current_buffer_mut());
-//!     pass.cursor = Some(Position::new(2, row.y));
+//!     if row.width > 2 {
+//!         pass.cursor = Some(Position::new(row.x.saturating_add(2), row.y));
+//!     }
 //!     Ok(())
 //! }
 //!
@@ -145,10 +150,11 @@
 //! Each part of this keeps a rule that `draw` otherwise keeps for you:
 //!
 //! 1. **Resize lazily, once.** The first contributor of a frame calls
-//!    [`autoresize`](ratatui::Terminal::autoresize), which clears both buffers when the size
-//!    changed, so it must run before anything is drawn, and only on frames that are drawn. A
-//!    frame no contributor draws then leaves the screen alone; in windowed builds that keeps the
-//!    last frame visible while the window is resized.
+//!    [`autoresize`](ratatui::Terminal::autoresize), which resizes both buffers and clears the
+//!    screen (and the previous buffer) when the size changed, so it must run before anything is
+//!    drawn, and only on frames that are drawn. A frame no contributor draws then leaves the
+//!    screen alone; in windowed builds that keeps the last frame visible while the window is
+//!    resized.
 //! 2. **Skip idle frames.** Presenting a buffer nobody drew into diffs it against the last frame
 //!    and blanks the screen, so `present_frame` does nothing unless a contributor started the
 //!    frame.
@@ -159,8 +165,8 @@
 //! 4. **Pass the cursor through a resource.** Render with `Widget::render` or
 //!    `StatefulWidget::render` into
 //!    [`current_buffer_mut`](ratatui::Terminal::current_buffer_mut). Do not use
-//!    `get_frame().set_cursor_position(..)`: only `draw` reads the position a `Frame` records,
-//!    so it is silently dropped. Store it in the pass instead and present with
+//!    `get_frame().set_cursor_position(..)`: only `draw` / `try_draw` reads the position a
+//!    `Frame` records, so it is silently dropped. Store it in the pass instead and present with
 //!    `pass.cursor.take()`, which also hides the cursor on later frames that set none.
 //!
 //! # Input Forwarding
