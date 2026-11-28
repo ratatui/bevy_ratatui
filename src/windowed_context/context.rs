@@ -7,6 +7,16 @@ use ratatui::Terminal;
 /// Ratatui context that draws into a cell grid which
 /// [`WindowedPlugin`](crate::windowed::WindowedPlugin) renders to a texture and displays in a
 /// window, instead of drawing to a terminal buffer.
+///
+/// It dereferences to the Ratatui [`Terminal`]. Call [`draw`](Terminal::draw) on it once per
+/// frame, from one system in `Update` (or in `PostUpdate` before
+/// [`TerminalSystems::Sync`](crate::windowed::TerminalSystems::Sync)): a second `draw` in the
+/// same frame starts from a cleared buffer and erases what the first one drew. To let several
+/// systems draw parts of one frame, see [Drawing a frame](crate#drawing-a-frame).
+///
+/// The grid follows the window, and keeps showing the last frame until the next draw. Resizing
+/// Ratatui's own buffers ([`autoresize`](Terminal::autoresize), which `draw` calls) clears the
+/// grid, so call it only on a frame that goes on to draw.
 #[derive(Resource, Deref, DerefMut)]
 pub struct WindowedContext(Terminal<RatatuiBackend>);
 

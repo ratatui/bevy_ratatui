@@ -19,7 +19,7 @@ features = ["windowed", "scrolling-regions"]
 [dependencies]
 bevy = { version = "0.20.0", default-features = false }
 bitflags = { version = "2.8", optional = true }
-ratatui = { version = "0.30", default-features = false }
+ratatui = { version = "0.30.1", default-features = false }
 bevy_terminal_ratatui = { version = "0.12.0", default-features = false, optional = true }
 
 [dev-dependencies]
@@ -28,7 +28,7 @@ rand = "0.9"
 bevy = { version = "0.20.0", default-features = false, features = [
   "bevy_state",
 ] }
-ratatui = { version = "0.30", default-features = false, features = [
+ratatui = { version = "0.30.1", default-features = false, features = [
   "underline-color",
   "layout-cache",
   "unstable-widget-ref",
@@ -68,6 +68,11 @@ required-features = ["crossterm"]
 name = "mouse"
 path = "examples/mouse.rs"
 required-features = ["crossterm", "mouse"]
+
+[[example]]
+name = "multi_draw"
+path = "examples/multi_draw.rs"
+test = true
 
 [[example]]
 name = "snake"
