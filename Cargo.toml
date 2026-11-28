@@ -18,10 +18,9 @@ features = ["windowed", "scrolling-regions"]
 
 [dependencies]
 bevy = { version = "0.20.0", default-features = false }
-bitflags = "2.8"
+bitflags = { version = "2.8", optional = true }
 ratatui = { version = "0.30", default-features = false }
 bevy_terminal_ratatui = { version = "0.12.0", default-features = false, optional = true }
-tracing = "0.1"
 
 [dev-dependencies]
 color-eyre = "0.6"
@@ -36,14 +35,45 @@ ratatui = { version = "0.30", default-features = false, features = [
 ] }
 
 [[example]]
+name = "bevy_keys"
+path = "examples/bevy_keys.rs"
+required-features = ["crossterm", "keyboard"]
+
+[[example]]
 name = "demo"
 path = "examples/demo.rs"
 test = true
 
 [[example]]
+name = "hello_world"
+path = "examples/hello_world.rs"
+required-features = ["crossterm"]
+
+[[example]]
+name = "kitty"
+path = "examples/kitty.rs"
+required-features = ["crossterm"]
+
+[[example]]
+name = "layout"
+path = "examples/layout.rs"
+required-features = ["crossterm"]
+
+[[example]]
+name = "layout_test"
+path = "examples/layout_test.rs"
+required-features = ["crossterm"]
+
+[[example]]
+name = "mouse"
+path = "examples/mouse.rs"
+required-features = ["crossterm", "mouse"]
+
+[[example]]
 name = "snake"
 path = "examples/snake/main.rs"
 test = true
+required-features = ["crossterm"]
 
 [[example]]
 name = "windowed_fonts"
@@ -79,8 +109,10 @@ opt-level = 3
 debug-assertions = false
 
 [features]
-default = ["std", "async_executor", "crossterm", "keyboard", "mouse"]
-crossterm = ["ratatui/crossterm"]
+default = ["async_executor", "crossterm", "keyboard", "mouse"]
+# One backend (`crossterm` or `windowed`) is required. Both enable `bevy/std` so
+# Bevy uses its standard-library clock rather than the non-std tick fallback.
+crossterm = ["ratatui/crossterm", "bevy/std"]
 # The windowed backend renders the Ratatui buffer into a texture on the GPU
 # with `bevy_terminal` and displays it in a window, using Bevy's built-in
 # default monospace font (ASCII coverage, paired with procedural box-drawing,
@@ -114,7 +146,7 @@ windowed = [
   "bevy/bevy_ui",
   "bevy/bevy_ui_render",
 ]
-keyboard = ["bevy/keyboard"]
+keyboard = ["bevy/keyboard", "dep:bitflags"]
 mouse = ["bevy/mouse"]
 # Ratatui's extended backend trait, whose scroll methods every backend in the
 # build must then implement: enabling `ratatui/scrolling-regions` directly would
@@ -123,11 +155,4 @@ scrolling-regions = [
   "ratatui/scrolling-regions",
   "bevy_terminal_ratatui?/scrolling-regions",
 ]
-
-# Features for `std` platforms
-std = ["bevy/std"]
 async_executor = ["bevy/async_executor"]
-
-# Features for `no_std` platforms
-libm = ["bevy/libm"]
-critical-section = ["bevy/critical-section"]

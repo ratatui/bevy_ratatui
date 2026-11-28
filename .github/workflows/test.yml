@@ -6,6 +6,9 @@ on:
       - main
   pull_request:
 
+env:
+  CARGO_TERM_COLOR: always
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -13,17 +16,34 @@ concurrency:
 jobs:
   required:
     runs-on: ubuntu-latest
-    name: ubuntu - ${{ matrix.toolchain }}
+    name: ubuntu - ${{ matrix.name }} (${{ matrix.toolchain }})
+    continue-on-error: ${{ matrix.toolchain == 'beta' }}
     strategy:
+      fail-fast: false
       matrix:
-        toolchain: [stable, beta]
+        include:
+          - name: default
+            toolchain: stable
+            features: ""
+          - name: windowed
+            toolchain: stable
+            features: "--no-default-features --features windowed"
+            windowed: true
+          - name: all-features
+            toolchain: stable
+            features: "--all-features"
+            windowed: true
+          - name: default
+            toolchain: beta
+            features: ""
     steps:
       - uses: actions/checkout@v4
 
       - name: clear disk space
-        uses: jlumbroso/free-disk-space@main
+        if: ${{ matrix.windowed }}
+        uses: jlumbroso/free-disk-space@v2.0.0
         with:
-          tools-cache: false
+          tool-cache: false
           android: true
           dotnet: true
           haskell: true
@@ -32,32 +52,35 @@ jobs:
           docker-images: true
 
       - name: linux dependencies
+        if: ${{ matrix.windowed }}
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+          sudo apt-get install --no-install-recommends -y libwayland-dev libxkbcommon-dev
 
       - name: install rust ${{ matrix.toolchain }}
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
 
-      - name: cargo generate-lockfile
-        run: cargo generate-lockfile
+      - name: cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: test-${{ matrix.name }}-${{ matrix.toolchain }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: cargo test --locked
-        run: cargo test --locked --all-features --all-targets
+      - name: cargo test --all-targets
+        run: cargo test --locked ${{ matrix.features }} --all-targets
 
       - name: cargo test --doc
-        run: cargo test --locked --all-features --doc
+        run: cargo test --locked ${{ matrix.features }} --doc
 
-      - name: cargo test --test pty (crossterm)
-        run: cargo test --locked --no-default-features --features crossterm,mouse,keyboard --test pty
-
+      # Keep panic=abort artifacts outside `target/` so `rust-cache` does not archive them.
       - name: cargo test --test pty (panic=abort)
+        if: ${{ matrix.name == 'default' && matrix.toolchain == 'stable' }}
         env:
           RUSTFLAGS: -Cpanic=abort
-          CARGO_TARGET_DIR: target/pty-abort
-        run: cargo test --locked --no-default-features --features crossterm,mouse,keyboard --test pty
+          CARGO_TARGET_DIR: ${{ runner.temp }}/pty-abort
+        run: cargo test --locked --test pty
 
   os-check:
     runs-on: ${{ matrix.os }}
@@ -73,11 +96,17 @@ jobs:
       - name: install rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: cargo generate-lockfile
-        run: cargo generate-lockfile
-
       - name: cache cargo dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          key: os-check-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: cargo test
+      - name: cargo check (default)
+        run: cargo check --locked --all-targets
+
+      - name: cargo test (all-features)
         run: cargo test --locked --all-features --all-targets
+
+      - name: cargo test --doc (all-features)
+        run: cargo test --locked --all-features --doc

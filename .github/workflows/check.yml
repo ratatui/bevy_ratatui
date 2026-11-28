@@ -30,8 +30,7 @@ jobs:
   clippy:
     name: clippy - ${{ matrix.toolchain }}
     runs-on: ubuntu-latest
-    permissions:
-      checks: write
+    continue-on-error: ${{ matrix.toolchain == 'beta' }}
     strategy:
       fail-fast: false
       matrix:
@@ -39,32 +38,73 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v4
+      - name: clear disk space
+        uses: jlumbroso/free-disk-space@v2.0.0
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          swap-storage: true
+          docker-images: true
       - name: linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
-      - name: install rust stable
-        uses: dtolnay/rust-toolchain@stable
+          sudo apt-get install --no-install-recommends -y libwayland-dev libxkbcommon-dev libfontconfig1-dev pkg-config
+      - name: install rust ${{ matrix.toolchain }}
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ matrix.toolchain }}
           components: clippy
       - name: cache cargo dependencies
         uses: Swatinem/rust-cache@v2
-      - name: clippy
-        uses: clechasseur/rs-clippy-check@v3
+        with:
+          key: clippy-${{ matrix.toolchain }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: clippy (default)
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: clippy (crossterm)
+        run: cargo clippy --locked --no-default-features --features crossterm --all-targets -- -D warnings
+      - name: clippy (windowed)
+        run: cargo clippy --locked --no-default-features --features windowed --all-targets -- -D warnings
+      - name: clippy (all-features)
+        run: cargo clippy --locked --all-features --all-targets -- -D warnings
+      # Not `--locked`: `bevy/system_font_discovery` is not a crate feature so its platform
+      # font dependencies are not recorded in `Cargo.lock`. Restore `Cargo.lock` afterwards so
+      # `rust-cache` sees a clean workspace.
+      - name: check windowed_system_fonts example
+        if: ${{ matrix.toolchain == 'stable' }}
+        run: |
+          cargo check --example windowed_system_fonts --no-default-features --features windowed,bevy/system_font_discovery
+          git checkout -- Cargo.lock
 
   doc:
     name: doc
     runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: "--cfg docsrs -D warnings"
     steps:
       - name: checkout
         uses: actions/checkout@v4
       - name: linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+          sudo apt-get install --no-install-recommends -y libwayland-dev libxkbcommon-dev
       - name: install rust nightly
         uses: dtolnay/rust-toolchain@nightly
-      - name: cargo doc
-        run: cargo doc --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: --cfg docsrs
+      - name: cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: doc-nightly
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: cargo doc (default)
+        run: cargo doc --locked --no-deps
+      - name: cargo doc (crossterm)
+        run: cargo doc --locked --no-deps --no-default-features --features crossterm
+      - name: cargo doc (windowed)
+        run: cargo doc --locked --no-deps --no-default-features --features windowed
+      - name: cargo doc (docs.rs features)
+        run: cargo doc --locked --no-deps --features windowed,scrolling-regions
+      - name: cargo doc (all-features)
+        run: cargo doc --locked --no-deps --all-features

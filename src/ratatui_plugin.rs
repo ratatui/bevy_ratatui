@@ -20,12 +20,21 @@ use crate::RatatuiContext;
 /// mouse modes apply only to a context [`ContextPlugin`] creates, while input forwarding (if
 /// enabled) still requests focus reporting in `PostStartup` and the context is still removed on
 /// [`AppExit`].
+///
+/// When the `windowed` feature is enabled anywhere in the build, this plugin group adds only
+/// `WindowedPlugin` and [`ContextPlugin`], and its three terminal flags
+/// ([`enable_kitty_protocol`](Self::enable_kitty_protocol),
+/// [`enable_mouse_capture`](Self::enable_mouse_capture), and
+/// [`enable_input_forwarding`](Self::enable_input_forwarding)) have no effect. In terminal
+/// builds, `enable_input_forwarding` requires the `keyboard` feature and `enable_mouse_capture`
+/// requires the `mouse` feature.
 pub struct RatatuiPlugins {
-    /// Use kitty protocol if available and enabled.
+    /// Use kitty protocol if available and enabled. Has no effect under `windowed`.
     pub enable_kitty_protocol: bool,
-    /// Capture mouse if enabled.
+    /// Capture mouse if enabled (requires the `mouse` feature). Has no effect under `windowed`.
     pub enable_mouse_capture: bool,
-    /// Forwards terminal input events to the bevy input system if enabled.
+    /// Forwards terminal input events to the bevy input system if enabled (requires the
+    /// `keyboard` feature). Has no effect under `windowed`.
     pub enable_input_forwarding: bool,
 }
 

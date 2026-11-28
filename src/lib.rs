@@ -1,8 +1,26 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
 //! A collection of plugins for building terminal-based applications with [Bevy] and [Ratatui].
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! This example uses the default `crossterm` backend.
+#![cfg_attr(
+    feature = "windowed",
+    doc = "For the windowed backend, see the [`windowed`] module."
+)]
+#![cfg_attr(
+    not(feature = "windowed"),
+    doc = "For the windowed backend, enable the `windowed` feature and see the `windowed` module."
+)]
+//!
+#![cfg_attr(
+    all(feature = "crossterm", not(feature = "windowed")),
+    doc = "```rust,no_run"
+)]
+#![cfg_attr(
+    not(all(feature = "crossterm", not(feature = "windowed"))),
+    doc = "```rust,ignore"
+)]
 //! use std::time::Duration;
 //!
 //! use bevy::{
@@ -62,18 +80,36 @@
 //! [Ratatui]: https://ratatui.rs
 //! [examples]: https://github.com/ratatui/bevy_ratatui/tree/main/examples
 
+#[cfg(not(any(feature = "crossterm", feature = "windowed")))]
+compile_error!(
+    "bevy_ratatui requires at least one backend feature: enable `crossterm` or `windowed`."
+);
+
 #[cfg(feature = "crossterm")]
 mod crossterm_context;
+#[cfg(any(feature = "crossterm", feature = "windowed"))]
 mod ratatui_plugin;
 #[cfg(feature = "windowed")]
 mod windowed_context;
 
+/// The active Ratatui terminal context resource for the selected backend.
+///
+/// This is a compile-time alias (see [`context`]): when the `windowed` feature is enabled
+/// anywhere in the build, it resolves to `WindowedContext`; otherwise it resolves to
+/// `CrosstermContext`.
+#[cfg(any(feature = "crossterm", feature = "windowed"))]
+#[cfg_attr(docsrs, doc(auto_cfg = false))]
+#[doc(inline)]
 pub use context::DefaultContext as RatatuiContext;
+#[cfg(any(feature = "crossterm", feature = "windowed"))]
+#[cfg_attr(docsrs, doc(auto_cfg = false))]
 pub use ratatui_plugin::{ContextSystems, RatatuiPlugins};
 
 #[cfg(feature = "crossterm")]
 pub use ratatui::crossterm;
 
+#[cfg(any(feature = "crossterm", feature = "windowed"))]
+#[cfg_attr(docsrs, doc(auto_cfg = false))]
 pub mod context {
     #[cfg(feature = "crossterm")]
     pub use super::crossterm_context::context::CrosstermContext;

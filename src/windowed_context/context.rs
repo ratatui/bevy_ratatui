@@ -4,8 +4,9 @@ use bevy::prelude::*;
 use bevy_terminal_ratatui::RatatuiBackend;
 use ratatui::Terminal;
 
-/// Ratatui context that draws into a cell grid which [`WindowedPlugin`](super::plugin::WindowedPlugin) renders to a texture and
-/// displays in a window, instead of drawing to a terminal buffer.
+/// Ratatui context that draws into a cell grid which
+/// [`WindowedPlugin`](crate::windowed::WindowedPlugin) renders to a texture and displays in a
+/// window, instead of drawing to a terminal buffer.
 #[derive(Resource, Deref, DerefMut)]
 pub struct WindowedContext(Terminal<RatatuiBackend>);
 
