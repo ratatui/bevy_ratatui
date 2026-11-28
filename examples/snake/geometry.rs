@@ -76,18 +76,6 @@ impl Board {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn checked_constructor_rejects_non_positive_dimensions() {
-        assert_eq!(Board::try_new(0, 20), None);
-        assert_eq!(Board::try_new(20, 0), None);
-        assert_eq!(Board::try_new(-1, 20), None);
-    }
-}
-
 /// Coordinate in logical board cells.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Point {
@@ -111,5 +99,17 @@ impl Point {
             Direction::Left => Self::new(self.x - 1, self.y),
             Direction::Right => Self::new(self.x + 1, self.y),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_constructor_rejects_non_positive_dimensions() {
+        assert_eq!(Board::try_new(0, 20), None);
+        assert_eq!(Board::try_new(20, 0), None);
+        assert_eq!(Board::try_new(-1, 20), None);
     }
 }

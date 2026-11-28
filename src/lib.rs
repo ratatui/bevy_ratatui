@@ -88,6 +88,7 @@ compile_error!(
 #[cfg(feature = "crossterm")]
 mod crossterm_context;
 #[cfg(any(feature = "crossterm", feature = "windowed"))]
+#[cfg_attr(docsrs, doc(auto_cfg = false))]
 mod ratatui_plugin;
 #[cfg(feature = "windowed")]
 mod windowed_context;
