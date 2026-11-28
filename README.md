@@ -84,9 +84,9 @@ example, see the [snake example](examples/snake/README.md).
   [bevy_terminal](https://github.com/gold-silver-copper/bevy_terminal); enables
   the Bevy features the windowed backend needs (windowing, rendering, text with
   `default_font`, and `bevy_ui`) and a set of platform defaults (X11 and
-  Wayland, WebGL2, multithreading); Cargo features are additive. The default
-  font has a single face, so bold and italic text render as regular until you
-  set bold and italic faces on `TerminalRenderConfig`.
+  Wayland, WebGL2, multithreading). The default font has a single face, so bold
+  and italic text render as regular until you set bold and italic faces on
+  `TerminalRenderConfig`.
 
   The context is a `Terminal<RatatuiBackend>` (it was soft_ratatui's
   `SoftBackend`, whose pixmap methods are gone), which is a breaking change for
@@ -95,11 +95,16 @@ example, see the [snake example](examples/snake/README.md).
   on the context, in `Startup` or later; see `bevy_ratatui::windowed`. Draw in
   `Update` (or in `PostUpdate` before `TerminalSystems::Sync`, when
   `bevy_terminal` reads the grid); drawing in `Last` shows one frame late.
+
+  Because Cargo features are additive and unified across the dependency graph,
+  enabling `bevy_ratatui/windowed` anywhere in a build switches
+  `RatatuiContext` and `RatatuiPlugins` to the windowed backend for the entire
+  build, and `RatatuiPlugins` then ignores its three crossterm flags
+  (`enable_kitty_protocol`, `enable_mouse_capture`, `enable_input_forwarding`).
+  Libraries should leave enabling `windowed` to the application.
 - `scrolling-regions`: Enable Ratatui's scrolling regions for every backend.
   Use this rather than `ratatui/scrolling-regions`, which leaves the windowed
   backend without the methods Ratatui then requires.
-
-There are also a handful of features relating to running Bevy in `no_std` mode.
 
 ## see also
 
