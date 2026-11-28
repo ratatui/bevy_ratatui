@@ -48,8 +48,8 @@ use crate::RatatuiContext;
 /// For mouse input, [`WindowedCursor`] is the cell under the cursor.
 pub struct WindowedPlugin;
 
-/// System set for [`WindowedPlugin`]'s `PreUpdate` systems (window scaling, grid fitting,
-/// and [`WindowedCursor`] tracking).
+/// System set for [`WindowedPlugin`]'s per-frame `PreUpdate` systems (window scaling, grid
+/// fitting, and [`WindowedCursor`] tracking; one-shot view/camera setup runs outside the set).
 ///
 /// Ordered after Bevy's [`InputSystems`](bevy::input::InputSystems) and before
 /// [`UiSystems::Focus`](bevy::ui::UiSystems::Focus) in `PreUpdate`, so a `PreUpdate` system
@@ -65,7 +65,8 @@ pub struct WindowedSystems;
 /// It is `None` before UI layout has run, while there is no unique primary window, while the
 /// terminal view is hidden, transparent, not drawn, or showing another image, when its camera is
 /// missing, inactive, not a 2D/3D UI camera, or not targeting the primary window, or while the
-/// cursor is outside the visible terminal.
+/// cursor is outside the visible terminal. It does not check occlusion by other UI nodes and
+/// assumes the plugin-managed view keeps its default image box and orientation.
 ///
 /// Order `PreUpdate` consumers `.after(WindowedSystems)` to observe both fresh Bevy input and
 /// this frame's cursor position.
@@ -121,13 +122,13 @@ struct TerminalView;
 type UiCameraFilter = Or<(With<Camera2d>, With<Camera3d>)>;
 
 /// Spawns the UI node showing the terminal, and a 2D camera unless the primary window has an
-/// active one.
+/// active 2D/3D camera.
 ///
 /// Bevy UI draws a node to its default camera: the one marked `IsDefaultUiCamera`, or the
-/// highest-order one on the primary window. Where that is an active camera on the primary window
-/// the node is left to it. Where it is not (it is inactive, or marked on another window or an
-/// image) the node is bound to another active camera on the primary window, or to the one
-/// spawned here.
+/// highest-order one on the primary window. Where that is an active 2D/3D camera on the primary
+/// window the node is left to it. Where it is not (it is inactive, not a `Camera2d`/`Camera3d`,
+/// or marked on another window or an image) the node is bound to another active 2D/3D camera on
+/// the primary window, or to the one spawned here.
 fn setup(
     mut commands: Commands,
     ui_camera: DefaultUiCamera,
@@ -326,9 +327,13 @@ fn track_cursor(
             return None;
         }
 
-        // Multiply before dividing so exact internal cell boundaries stay exact.
+        // Multiply before dividing so exact internal cell boundaries stay exact, and clamp
+        // sub-ULP rounding at the far edge (`offset < span`) to the last cell.
+        if grid.width == 0 || grid.height == 0 {
+            return None;
+        }
         let dimensions = DVec2::new(f64::from(grid.width), f64::from(grid.height));
-        let cell = (offset * dimensions) / span;
+        let cell = ((offset * dimensions) / span).min(dimensions - DVec2::ONE);
         (cell.cmpge(DVec2::ZERO).all() && cell.cmplt(dimensions).all())
             .then(|| Position::new(cell.x as u16, cell.y as u16))
     };

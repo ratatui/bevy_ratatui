@@ -699,7 +699,7 @@ fn the_cursor_is_mapped_to_the_cell_under_it() {
 }
 
 #[test]
-fn cursor_follows_laid_out_view_under_rounding_scaling_viewport_and_clip() {
+fn cursor_follows_laid_out_view_under_rounding_scaling_and_viewport() {
     let mut app = ui_app();
     // Fixed 16×16 cells in a 645×411 window guarantee an odd physical gutter on both axes at
     // every scale factor below, so unrounded centering lands at `.5` while Taffy rounds edges.
@@ -789,165 +789,185 @@ fn cursor_follows_laid_out_view_under_rounding_scaling_viewport_and_clip() {
             );
         }
     }
+}
 
-    // Exact internal cell seam: multiply before dividing keeps `341 * 58 / 638 == 31` exact
-    // (whereas `341.0 / 638.0 * 58.0` rounds to `30.999999999999996`).
+#[test]
+fn cursor_maps_exact_seams_and_ui_transforms() {
+    // 1. Exact internal cell seam: multiply before dividing keeps `341 * 58 / 638 == 31` exact
+    //    (whereas `341.0 / 638.0 * 58.0` rounds to `30.999999999999996`).
+    {
+        let mut app = ui_app();
+        window(&mut app, |window| {
+            window.resolution.set_physical_resolution(638, 400);
+        });
+        frames(&mut app, 2);
+        configure(&mut app, |config| {
+            config.sizing = TerminalSizing::Fixed {
+                font_size: 16.0,
+                cell_size: Vec2::new(11.0, 20.0),
+            };
+        });
+        frames(&mut app, 4);
+        let seam_geometry = ready(&mut app);
+        assert_eq!(seam_geometry.grid().width, 58);
+        assert_eq!(seam_geometry.size().x, 638);
+        let seam_rect = view_rect(&mut app);
+        assert_eq!(
+            cell_at(
+                &mut app,
+                Some((
+                    f64::from(seam_rect.min.x) + 341.0,
+                    f64::from(seam_rect.center().y),
+                ))
+            )
+            .map(|(col, _)| col),
+            Some(31),
+            "exact internal seam at column 31"
+        );
+    }
+
+    // 2. Scaled exact internal cell seam: 560px content box (70 cols of 8×20) centered at x = 280
+    //    with `scale.x = 91 / 64`. Column 11 starts at local x = -192, which transforms to
+    //    viewport x = 7 exactly.
+    {
+        let mut app = ui_app();
+        window(&mut app, |window| {
+            window.resolution.set_physical_resolution(560, 400);
+        });
+        frames(&mut app, 2);
+        configure(&mut app, |config| {
+            config.sizing = TerminalSizing::Fixed {
+                font_size: 16.0,
+                cell_size: Vec2::new(8.0, 20.0),
+            };
+        });
+        app.world_mut()
+            .query_filtered::<&mut UiTransform, With<ImageNode>>()
+            .single_mut(app.world_mut())
+            .expect("view transform")
+            .scale = Vec2::new(91.0 / 64.0, 1.0);
+        frames(&mut app, 4);
+        let scaled_seam = ready(&mut app);
+        assert_eq!(scaled_seam.grid().width, 70);
+        assert_eq!(scaled_seam.size().x, 560);
+        assert_eq!(
+            cell_at(&mut app, Some((7.0, 200.0))).map(|(col, _)| col),
+            Some(11),
+            "exact scaled internal seam at column 11"
+        );
+    }
+
+    // 3. Non-representable local seam on an integer screen pixel: 60 columns in a 400 px content
+    //    box centered at x = 300 with `scale.x = 1.5` spans 600 px so column 1 starts at x = 10.
+    //    Dividing by `det` before subtracting `min` would drift to `0.9999999999999986` (col 0).
+    {
+        let mut app = ui_app();
+        window(&mut app, |window| {
+            window.resolution.set_physical_resolution(600, 400);
+        });
+        frames(&mut app, 2);
+        configure(&mut app, |config| {
+            config.sizing = TerminalSizing::Fixed {
+                font_size: 16.0,
+                cell_size: Vec2::new(10.0, 20.0),
+            };
+        });
+        {
+            let (mut node, mut transform) = app
+                .world_mut()
+                .query_filtered::<(&mut Node, &mut UiTransform), With<ImageNode>>()
+                .single_mut(app.world_mut())
+                .expect("view node and transform");
+            node.max_width = px(400.0);
+            transform.scale = Vec2::new(1.5, 1.0);
+        }
+        frames(&mut app, 4);
+        assert_eq!(ready(&mut app).grid().width, 60);
+        assert_eq!(
+            cell_at(&mut app, Some((f64::from(10.0_f32.next_down()), 200.0))).map(|(col, _)| col),
+            Some(0),
+            "just left of scaled column 1 seam"
+        );
+        assert_eq!(
+            cell_at(&mut app, Some((10.0, 200.0))).map(|(col, _)| col),
+            Some(1),
+            "exact scaled column 1 seam at x = 10"
+        );
+    }
+
+    // 4. Translation shifts the hit-test target with layout.
+    {
+        let mut app = ui_app();
+        frames(&mut app, 4);
+        let before_shift = view_rect(&mut app);
+        app.world_mut()
+            .query_filtered::<&mut UiTransform, With<ImageNode>>()
+            .single_mut(app.world_mut())
+            .expect("view transform")
+            .translation = Val2::px(20.0, 10.0);
+        frames(&mut app, 2);
+        let shifted = view_rect(&mut app);
+        assert_eq!(shifted.min, before_shift.min + Vec2::new(20.0, 10.0));
+        assert_eq!(
+            cell_at(
+                &mut app,
+                Some((
+                    f64::from(shifted.min.x) + 1.0,
+                    f64::from(shifted.min.y) + 1.0
+                ))
+            ),
+            Some((0, 0))
+        );
+        assert_eq!(
+            cell_at(
+                &mut app,
+                Some((
+                    f64::from(before_shift.min.x) + 1.0,
+                    f64::from(before_shift.min.y) + 1.0
+                ))
+            ),
+            None
+        );
+    }
+
+    // 5. Reflection (`det < 0`, e.g. `scale.x = -1.0`) mirrors columns across the view.
+    {
+        let mut app = ui_app();
+        frames(&mut app, 4);
+        let grid = ready(&mut app).grid();
+        let rect = view_rect(&mut app);
+        app.world_mut()
+            .query_filtered::<&mut UiTransform, With<ImageNode>>()
+            .single_mut(app.world_mut())
+            .expect("view transform")
+            .scale = Vec2::new(-1.0, 1.0);
+        frames(&mut app, 2);
+        let mid_y = f64::from(rect.center().y);
+        assert_eq!(
+            cell_at(&mut app, Some((f64::from(rect.max.x) - 0.5, mid_y))).map(|(col, _)| col),
+            Some(0),
+            "reflected right edge maps to column 0"
+        );
+        assert_eq!(
+            cell_at(&mut app, Some((f64::from(rect.min.x) + 0.5, mid_y))).map(|(col, _)| col),
+            Some(grid.width - 1),
+            "reflected left edge maps to last column"
+        );
+    }
+}
+
+#[test]
+fn cursor_respects_camera_viewport_and_clipping_ancestor() {
+    let mut app = ui_app();
     window(&mut app, |window| {
-        window.resolution.set_scale_factor_override(Some(1.0));
-        window.resolution.set_physical_resolution(638, 400);
+        window.resolution.set_physical_resolution(800, 600);
     });
-    app.world_mut().resource_mut::<UiScale>().0 = 1.0;
-    app.world_mut()
-        .query::<&mut Camera>()
-        .single_mut(app.world_mut())
-        .expect("one camera")
-        .viewport = None;
+    frames(&mut app, 2);
     configure(&mut app, |config| {
         config.sizing = TerminalSizing::Fixed {
             font_size: 16.0,
             cell_size: Vec2::new(11.0, 20.0),
         };
-    });
-    frames(&mut app, 4);
-    let seam_geometry = ready(&mut app);
-    assert_eq!(seam_geometry.grid().width, 58);
-    assert_eq!(seam_geometry.size().x, 638);
-    let seam_rect = view_rect(&mut app);
-    assert_eq!(
-        cell_at(
-            &mut app,
-            Some((
-                f64::from(seam_rect.min.x) + 341.0,
-                f64::from(seam_rect.center().y),
-            ))
-        )
-        .map(|(col, _)| col),
-        Some(31),
-        "exact internal seam at column 31"
-    );
-
-    // Scaled exact internal cell seam: 560px content box (70 cols of 8×20) centered at x = 280
-    // with `scale.x = 91 / 64`. Column 11 starts at local x = -192, which transforms to viewport
-    // x = 7 exactly; solving the 2×2 inverse before dividing by det keeps column 11 exact.
-    window(&mut app, |window| {
-        window.resolution.set_physical_resolution(560, 400);
-    });
-    configure(&mut app, |config| {
-        config.sizing = TerminalSizing::Fixed {
-            font_size: 16.0,
-            cell_size: Vec2::new(8.0, 20.0),
-        };
-    });
-    app.world_mut()
-        .query_filtered::<&mut UiTransform, With<ImageNode>>()
-        .single_mut(app.world_mut())
-        .expect("view transform")
-        .scale = Vec2::new(91.0 / 64.0, 1.0);
-    frames(&mut app, 4);
-    let scaled_seam = ready(&mut app);
-    assert_eq!(scaled_seam.grid().width, 70);
-    assert_eq!(scaled_seam.size().x, 560);
-    assert_eq!(
-        cell_at(&mut app, Some((7.0, 200.0))).map(|(col, _)| col),
-        Some(11),
-        "exact scaled internal seam at column 11"
-    );
-    app.world_mut()
-        .query_filtered::<&mut UiTransform, With<ImageNode>>()
-        .single_mut(app.world_mut())
-        .expect("view transform")
-        .scale = Vec2::ONE;
-    frames(&mut app, 2);
-
-    // Non-representable local seam on an integer screen pixel: 60 columns in a 400 px content
-    // box centered at x = 300 with `scale.x = 1.5` spans 600 px so column 1 starts at x = 10.
-    // Dividing by `det` before subtracting `min` would drift to `0.9999999999999986` (col 0).
-    window(&mut app, |window| {
-        window.resolution.set_physical_resolution(600, 400);
-    });
-    configure(&mut app, |config| {
-        config.sizing = TerminalSizing::Fixed {
-            font_size: 16.0,
-            cell_size: Vec2::new(10.0, 20.0),
-        };
-    });
-    {
-        let (mut node, mut transform) = app
-            .world_mut()
-            .query_filtered::<(&mut Node, &mut UiTransform), With<ImageNode>>()
-            .single_mut(app.world_mut())
-            .expect("view node and transform");
-        node.max_width = px(400.0);
-        transform.scale = Vec2::new(1.5, 1.0);
-    }
-    frames(&mut app, 4);
-    assert_eq!(ready(&mut app).grid().width, 60);
-    assert_eq!(
-        cell_at(&mut app, Some((f64::from(10.0_f32.next_down()), 200.0))).map(|(col, _)| col),
-        Some(0),
-        "just left of scaled column 1 seam"
-    );
-    assert_eq!(
-        cell_at(&mut app, Some((10.0, 200.0))).map(|(col, _)| col),
-        Some(1),
-        "exact scaled column 1 seam at x = 10"
-    );
-    {
-        let (mut node, mut transform) = app
-            .world_mut()
-            .query_filtered::<(&mut Node, &mut UiTransform), With<ImageNode>>()
-            .single_mut(app.world_mut())
-            .expect("view node and transform");
-        node.max_width = Val::Auto;
-        transform.scale = Vec2::ONE;
-    }
-    frames(&mut app, 2);
-
-    // Non-identity invertible `UiTransform` (translation) shifts the hit-test target with layout.
-    let before_shift = view_rect(&mut app);
-    {
-        let mut transform = app
-            .world_mut()
-            .query_filtered::<&mut UiTransform, With<ImageNode>>()
-            .single_mut(app.world_mut())
-            .expect("view transform");
-        transform.translation = Val2::px(20.0, 10.0);
-    }
-    frames(&mut app, 2);
-    let shifted = view_rect(&mut app);
-    assert_eq!(shifted.min, before_shift.min + Vec2::new(20.0, 10.0));
-    assert_eq!(
-        cell_at(
-            &mut app,
-            Some((
-                f64::from(shifted.min.x) + 1.0,
-                f64::from(shifted.min.y) + 1.0
-            ))
-        ),
-        Some((0, 0))
-    );
-    assert_eq!(
-        cell_at(
-            &mut app,
-            Some((
-                f64::from(before_shift.min.x) + 1.0,
-                f64::from(before_shift.min.y) + 1.0
-            ))
-        ),
-        None
-    );
-
-    // Reset transform and test a smaller `Camera::viewport` rejecting pixels outside it.
-    {
-        let mut transform = app
-            .world_mut()
-            .query_filtered::<&mut UiTransform, With<ImageNode>>()
-            .single_mut(app.world_mut())
-            .expect("view transform");
-        transform.translation = Val2::ZERO;
-    }
-    window(&mut app, |window| {
-        window.resolution.set_physical_resolution(800, 600);
     });
     let vp_pos = UVec2::new(50, 40);
     let vp_size = UVec2::new(400, 300);
@@ -1084,7 +1104,8 @@ fn stale_cursor_is_cleared_and_change_detection_stays_quiet() {
         );
     }
 
-    // 3. Despawning the primary window clears the cursor and keeps change detection quiet.
+    // 3. Despawning the primary window clears the cursor and keeps change detection quiet
+    //    (keep a non-primary window alive to verify it is not adopted as primary).
     {
         let mut app = hovered_ui_app();
         app.world_mut().spawn(Window::default());
@@ -1165,8 +1186,8 @@ fn stale_cursor_is_cleared_and_change_detection_stays_quiet() {
             .single_mut(app.world_mut())
             .expect("one view")
             .image = other_image;
-        // Run a single `PreUpdate` before `present` restores the texture handle in `PostUpdate`,
-        // or inspect during `Update` right after `track_cursor` ran.
+        // Inspect during `Update` right after `track_cursor` runs, before `PostUpdate`'s
+        // `present` restores the texture handle.
         #[derive(Resource, Default)]
         struct SeenInUpdate(WindowedCursor);
         app.init_resource::<SeenInUpdate>().add_systems(
@@ -1226,7 +1247,7 @@ fn stale_cursor_is_cleared_and_change_detection_stays_quiet() {
     }
 
     // 10. A custom viewport whose `physical_position + physical_size` would overflow `u32` does
-    //     not panic.
+    //     not panic (prior layout is still in place on the immediate `PreUpdate` frame).
     {
         let mut app = hovered_ui_app();
         app.world_mut()
@@ -1238,16 +1259,16 @@ fn stale_cursor_is_cleared_and_change_detection_stays_quiet() {
             physical_size: UVec2::new(u32::MAX, 400),
             ..default()
         });
-        // Disable `UiSystems::Focus` here because Bevy's own focus system calls
-        // `Camera::physical_viewport_rect()` which overflows `u32`.
+        // Disable `UiSystems::Focus` because Bevy's own focus system calls
+        // `Camera::physical_viewport_rect()`, which overflows `u32`.
         app.configure_sets(PreUpdate, UiSystems::Focus.run_if(|| false));
         frames(&mut app, 1);
         assert!(app.world().resource::<WindowedCursor>().0.is_some());
     }
 
-    // 11. A singular `UiGlobalTransform` (determinant 0) clears to `None` without panicking
-    //     (even under `bevy/glam_assert`, with `UiSystems::Focus` disabled so Bevy's own
-    //     `UiGlobalTransform::try_inverse` does not intercept the test).
+    // 11. A singular `UiGlobalTransform` (determinant 0) clears to `None` without panicking.
+    //     `UiSystems::Focus` is disabled so Bevy's eager `UiGlobalTransform::try_inverse` does
+    //     not panic first when `bevy/glam_assert` is enabled.
     {
         let mut app = hovered_ui_app();
         app.configure_sets(PreUpdate, UiSystems::Focus.run_if(|| false));
@@ -1257,6 +1278,19 @@ fn stale_cursor_is_cleared_and_change_detection_stays_quiet() {
             .expect("view transform")
             .scale = Vec2::ZERO;
         frames(&mut app, 2);
+        assert_eq!(app.world().resource::<WindowedCursor>().0, None);
+    }
+
+    // 12. A `NaN` `ComputedNode::size` clears to `None` without panicking in `content_box()`.
+    {
+        let mut app = hovered_ui_app();
+        app.configure_sets(PreUpdate, UiSystems::Focus.run_if(|| false));
+        app.world_mut()
+            .query_filtered::<&mut ComputedNode, With<ImageNode>>()
+            .single_mut(app.world_mut())
+            .expect("computed node")
+            .size = Vec2::NAN;
+        frames(&mut app, 1);
         assert_eq!(app.world().resource::<WindowedCursor>().0, None);
     }
 }
@@ -1282,7 +1316,6 @@ fn windowed_systems_orders_after_input_without_ambiguities() {
     app.init_resource::<Observed>().add_systems(
         PreUpdate,
         (
-            || {},
             (|_windows: Query<&mut Window, With<PrimaryWindow>>| {}).after(UiSystems::Focus),
             (|cursor: Res<WindowedCursor>,
               buttons: Res<ButtonInput<MouseButton>>,
