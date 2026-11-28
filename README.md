@@ -60,6 +60,35 @@ fn input_system(mut messages: MessageReader<KeyMessage>, mut exit: MessageWriter
 ...or use the `enable_input_forwarding` option in `RatatuiPlugins` which will
 map crossterm input events to normal bevy input messages.
 
+## drawing
+
+Call `context.draw` once per frame, in `Update` (or, with `windowed`, in
+`PostUpdate` before `TerminalSystems::Sync`). Ratatui is double buffered: each
+`draw` presents a whole frame and then clears the buffer the next one renders
+into, so a second `draw` in the same frame replaces the first. Split the frame
+with layouts inside one draw system and let other systems supply its data, as
+the [layout example](examples/layout.rs) does.
+
+When parts of the screen belong to separate systems or plugins, they can each
+render into `context.current_buffer_mut()` (with `Widget::render` or
+`StatefulWidget::render`), and one system ordered after them all presents the
+frame with `context.apply_buffer_with_cursor(..)` (Ratatui 0.30.1 or later).
+The [multi_draw example](examples/multi_draw.rs) shows the whole pattern, with
+a small `FramePass` resource the systems share. It keeps four rules:
+
+1. The first system to draw in a frame calls `context.autoresize()`, once,
+   before drawing; frames nothing draws do not resize, so the windowed backend
+   keeps showing the last frame while its window is resized.
+2. If no system drew, the presenting system does nothing: presenting an
+   untouched buffer would blank the screen.
+3. Every system draws its part on every frame that is presented; a region
+   nobody drew is presented as blank.
+4. A system that wants the cursor stores its position in the resource, and the
+   presenting system passes `pass.cursor.take()` to `apply_buffer_with_cursor`,
+   so the cursor hides again on frames that set none.
+   `get_frame().set_cursor_position(..)` does nothing outside `draw` /
+   `try_draw`.
+
 ## demo
 
 ![Made with VHS](https://vhs.charm.sh/vhs-2g0S6RgGGQHseTCNItEQhg.gif)
@@ -69,7 +98,8 @@ For splitting the terminal into regions with Ratatui layouts, see the
 [layout example](examples/layout.rs), and the
 [layout stress test](examples/layout_test.rs) for nested layouts, every
 constraint and flex mode, and every widget. For a larger multi-file game
-example, see the [snake example](examples/snake/README.md).
+example, see the [snake example](examples/snake/README.md). For several
+systems drawing one frame, see the [multi_draw example](examples/multi_draw.rs).
 
 ## features
 

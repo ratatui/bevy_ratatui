@@ -64,6 +64,111 @@
 //!
 //! See the [examples] directory for more examples.
 //!
+//! # Drawing a frame
+//!
+//! Call [`draw`](ratatui::Terminal::draw) on the context **once per frame**, in `Update`
+#![cfg_attr(
+    feature = "windowed",
+    doc = "(or, in windowed builds, in `PostUpdate` before [`TerminalSystems::Sync`](windowed::TerminalSystems::Sync))."
+)]
+#![cfg_attr(
+    not(feature = "windowed"),
+    doc = "(or, in windowed builds, in `PostUpdate` before `TerminalSystems::Sync`)."
+)]
+//! Ratatui is double buffered: each `draw` presents a whole frame and then swaps buffers, clearing
+//! the one the next `draw` renders into, so a second `draw` in the same frame replaces the first
+//! rather than adding to it. Split the frame with Ratatui layouts inside that one draw system and
+//! let other systems contribute the data it draws, as the [layout example] does.
+//!
+//! When parts of the screen belong to decoupled systems or plugins, they can instead render into
+//! the context's current buffer and leave presenting it to one system that runs after them all,
+//! with [`Terminal::apply_buffer_with_cursor`](ratatui::Terminal::apply_buffer_with_cursor)
+//! (Ratatui 0.30.1 or later). The [multi_draw example] does this; the essentials are:
+//!
+//! ```rust,no_run
+//! use bevy::prelude::*;
+//! use bevy_ratatui::RatatuiContext;
+//! use ratatui::{layout::{Position, Rect}, text::Line, widgets::Widget};
+//!
+//! #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+//! struct DrawSystems;
+//!
+//! /// What this frame's contributors have done.
+//! #[derive(Resource, Default)]
+//! struct FramePass {
+//!     started: bool,
+//!     cursor: Option<Position>,
+//! }
+//!
+//! /// Adopts the terminal size once, before the first contributor of a frame draws.
+//! fn begin_frame(context: &mut RatatuiContext, pass: &mut FramePass) -> Result<Rect> {
+//!     if !pass.started {
+//!         context.autoresize()?;
+//!         pass.started = true;
+//!     }
+//!     Ok(context.current_buffer_mut().area)
+//! }
+//!
+//! fn draw_header(mut context: ResMut<RatatuiContext>, mut pass: ResMut<FramePass>) -> Result {
+//!     let area = begin_frame(&mut context, &mut pass)?;
+//!     Line::from("header").render(area, context.current_buffer_mut());
+//!     Ok(())
+//! }
+//!
+//! fn draw_prompt(mut context: ResMut<RatatuiContext>, mut pass: ResMut<FramePass>) -> Result {
+//!     let area = begin_frame(&mut context, &mut pass)?;
+//!     if area.height == 0 {
+//!         return Ok(());
+//!     }
+//!     let row = Rect { y: area.bottom().saturating_sub(1), height: 1, ..area };
+//!     Line::from("> ").render(row, context.current_buffer_mut());
+//!     if row.width > 2 {
+//!         pass.cursor = Some(Position::new(row.x.saturating_add(2), row.y));
+//!     }
+//!     Ok(())
+//! }
+//!
+//! fn present_frame(mut context: ResMut<RatatuiContext>, mut pass: ResMut<FramePass>) -> Result {
+//!     // Take the cursor first so an idle frame or error never leaves a stale position behind.
+//!     let cursor = pass.cursor.take();
+//!     // Nothing was drawn this frame: keep showing the last one.
+//!     if std::mem::take(&mut pass.started) {
+//!         context.apply_buffer_with_cursor(cursor)?;
+//!     }
+//!     Ok(())
+//! }
+//!
+//! App::new().init_resource::<FramePass>().add_systems(
+//!     Update,
+//!     (
+//!         (draw_header, draw_prompt).chain().in_set(DrawSystems),
+//!         present_frame.after(DrawSystems),
+//!     ),
+//! );
+//! ```
+//!
+//! Each part of this keeps a rule that `draw` otherwise keeps for you:
+//!
+//! 1. **Resize lazily, once.** The first contributor of a frame calls
+//!    [`autoresize`](ratatui::Terminal::autoresize), which resizes both buffers and clears the
+//!    screen (and the previous buffer) when the size changed, so it must run before anything is
+//!    drawn, and only on frames that are drawn. A frame no contributor draws then leaves the
+//!    screen alone; in windowed builds that keeps the last frame visible while the window is
+//!    resized.
+//! 2. **Skip idle frames.** Presenting a buffer nobody drew into diffs it against the last frame
+//!    and blanks the screen, so `present_frame` does nothing unless a contributor started the
+//!    frame.
+//! 3. **Redraw the whole frame.** The buffer starts out empty every frame, so every contributor
+//!    must draw on every frame that is presented; a region nobody drew comes out blank. Put any
+//!    run condition on the whole `DrawSystems` set so contributors skip together, and order
+//!    contributors whose areas overlap so later ones paint over earlier ones.
+//! 4. **Pass the cursor through a resource.** Render with `Widget::render` or
+//!    `StatefulWidget::render` into
+//!    [`current_buffer_mut`](ratatui::Terminal::current_buffer_mut). Do not use
+//!    `get_frame().set_cursor_position(..)`: only `draw` / `try_draw` reads the position a
+//!    `Frame` records, so it is silently dropped. Store it in the pass instead and present with
+//!    `pass.cursor.take()`, which also hides the cursor on later frames that set none.
+//!
 //! # Input Forwarding
 //!
 //! The terminal input can be forwarded to the bevy input system.
@@ -79,6 +184,8 @@
 //! [Bevy]: https://bevyengine.org
 //! [Ratatui]: https://ratatui.rs
 //! [examples]: https://github.com/ratatui/bevy_ratatui/tree/main/examples
+//! [layout example]: https://github.com/ratatui/bevy_ratatui/blob/main/examples/layout.rs
+//! [multi_draw example]: https://github.com/ratatui/bevy_ratatui/blob/main/examples/multi_draw.rs
 
 #[cfg(not(any(feature = "crossterm", feature = "windowed")))]
 compile_error!(
@@ -140,9 +247,10 @@ pub mod translation {}
 /// The windowed backend: the plugin, the backend the context draws into, and the renderer's
 /// configuration and inspection types.
 ///
-/// Draw to the context in `Update`, or in `PostUpdate` before
+/// Draw to the context once per frame in `Update`, or in `PostUpdate` before
 /// [`TerminalSystems::Sync`](windowed::TerminalSystems::Sync) (when `bevy_terminal` reads the
-/// grid); drawing in `Last` shows one frame late.
+/// grid); drawing in `Last` shows one frame late. See [Drawing a frame](crate#drawing-a-frame)
+/// for why one `draw` per frame, and for composing a frame from several systems.
 ///
 /// The context is a resource that also carries the renderer's components. Set fonts, sizing,
 /// theme and cursor on its [`TerminalRenderConfig`](windowed::TerminalRenderConfig) in

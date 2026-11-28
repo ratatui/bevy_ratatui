@@ -89,6 +89,11 @@ impl Session {
 }
 
 /// Ratatui context that draws to the terminal using crossterm and restores it at most once.
+///
+/// It dereferences to the Ratatui [`Terminal`]. Call [`draw`](Terminal::draw) on it once per
+/// frame, from one system in `Update`: a second `draw` in the same frame starts from a cleared
+/// buffer and erases what the first one drew. To let several systems draw parts of one frame,
+/// see [Drawing a frame](crate#drawing-a-frame).
 #[derive(Resource, Deref, DerefMut, Debug)]
 pub struct CrosstermContext {
     #[deref]
