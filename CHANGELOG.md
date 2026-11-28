@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+## [0.14.0](https://github.com/ratatui/bevy_ratatui/compare/v0.13.0...v0.14.0) - 2026-11-28
+
+### Added
+
+- [**breaking**] require backend feature, clean up manifest features, and test combinations in CI ([#128](https://github.com/ratatui/bevy_ratatui/pull/128))
+- create RatatuiContext in PreStartup and keep pre-existing context ([#126](https://github.com/ratatui/bevy_ratatui/pull/126))
+- [**breaking**] unify keyboard forwarding with same-frame taps and focus loss ([#16](https://github.com/ratatui/bevy_ratatui/pull/16)) ([#123](https://github.com/ratatui/bevy_ratatui/pull/123))
+- *(windowed)* add WindowedCursor, the terminal cell under the mouse ([#120](https://github.com/ratatui/bevy_ratatui/pull/120))
+- [**breaking**] replace soft_ratatui with bevy_terminal_ratatui in the windowed backend ([#119](https://github.com/ratatui/bevy_ratatui/pull/119))
+
+### Fixed
+
+- *(windowed)* map WindowedCursor from laid-out UI view and add WindowedSystems ([#127](https://github.com/ratatui/bevy_ratatui/pull/127))
+- [**breaking**] restore the terminal exactly once, in order ([#104](https://github.com/ratatui/bevy_ratatui/pull/104)) ([#122](https://github.com/ratatui/bevy_ratatui/pull/122))
+
 ## [0.13.0](https://github.com/ratatui/bevy_ratatui/compare/v0.12.0...v0.13.0) - 2026-10-12
 
 ### Other
